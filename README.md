@@ -1,1 +1,1 @@
-# kbai-package-java
+# kbai-package-python
