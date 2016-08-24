@@ -1,1 +1,1 @@
-# kbai-project-package
+# kbai-package-java
