@@ -240,7 +240,7 @@ H
 		size:very small
 		fill:yes
 		above:17,18,19,20,21,22,23,24
-		left-of:18,19,22
+		left-of:17,18,21
 	17
 		shape:diamond
 		size:very small
@@ -263,7 +263,7 @@ H
 		size:very small
 		fill:yes
 		above:21,23,24
-		left-of:18,19,22
+		left-of:17,18,21
 	21
 		shape:diamond
 		size:very small
@@ -286,7 +286,7 @@ H
 		shape:diamond
 		size:very small
 		fill:yes
-		left-of:18,19,22
+		left-of:17,18,21
 5
 	25
 		shape:diamond
