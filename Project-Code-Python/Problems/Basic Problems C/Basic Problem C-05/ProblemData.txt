@@ -165,6 +165,7 @@ H
 		shape:circle
 		size:very small
 		fill:yes
+		above:z
 1
 	4
 		shape:star
