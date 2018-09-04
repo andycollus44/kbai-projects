@@ -5,6 +5,8 @@
 
 # A single Raven's Progressive Matrix problem, represented by a type (2x2
 # or 3x3), a String name, and a dictionary of figures.
+
+
 class RavensProblem:
     # Initializes a new Raven's Progressive Matrix problem given a name, a
     # type, and a correct answer to the problem. Also initializes a blank
@@ -14,19 +16,19 @@ class RavensProblem:
     def __init__(self, name, problemType, problemSetName, hasVisual, hasVerbal):
         # The name of the problem, typically the set followed by an identifier,
         # such as "Basic Problem B-02".
-        self.name=name
+        self.name = name
 
         # The type of problem, either 2x2 or 3x3.
-        self.problemType=problemType
+        self.problemType = problemType
 
         # The name of the ProblemSet to which this RavensProblem belongs
         self.problemSetName = problemSetName
 
         # Whether or not the problem has visual representations available.
-        self.hasVisual=hasVisual
+        self.hasVisual = hasVisual
 
         # Whether or not the problem has verbal representations available.
-        self.hasVerbal=hasVerbal
+        self.hasVerbal = hasVerbal
 
         # The dictionary representing the RavensFigures of the problem. The
         # key for each figure is the name of the figure. For example:
@@ -50,5 +52,4 @@ class RavensProblem:
         # C as D is to E is to F as G is to H is to one of the answer choices. A is
         # to D is G as B is to E is to H as C is to F is to one of the answer
         # choices. The answer choices are named 1 through 6.
-        self.figures={}
-
+        self.figures = {}

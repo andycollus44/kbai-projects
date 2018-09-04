@@ -5,6 +5,8 @@
 
 # A single object in a RavensFigure -- typically, a single shape in a frame,
 # such as a triangle or a circle -- comprised of a list of name-value attributes.
+
+
 class RavensObject:
     # Constructs a new RavensObject given a name.
     #
@@ -19,11 +21,10 @@ class RavensObject:
         # their reasoning over different figures.
         #
         # Within a RavensFigure, each RavensObject has a unique name.
-        self.name=name
+        self.name = name
 
         # A dictionary of name-value pairs representing this object's attributes. The key
         # for these attributes is the name of the attribute, and the value is the
         # value of the attribute. For example, a filled large square would have
         # attribute pairs "shape:square", "size:large", and "filled:yes".
-        self.attributes={}
-
+        self.attributes = {}

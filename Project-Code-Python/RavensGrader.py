@@ -5,18 +5,21 @@
 #
 # This file grades the answers your agent submits.
 
-import os
 import csv
+import os
+
 
 def outcome(truth, answer):
-    if truth==answer:
+    if truth == answer:
         return "Correct"
     elif answer < 0:
         return "Skipped"
     else:
-        return "Incorrect" 
+        return "Incorrect"
 
-# Reads answers from answers_file and outputs outcomes for individual
+    # Reads answers from answers_file and outputs outcomes for individual
+
+
 # problems in ProblemResults.csv and set summaries in SetResults.csv
 def grade():
     answers = {}
@@ -29,11 +32,10 @@ def grade():
             else:
                 answers[row['ProblemSet']] = {row['RavensProblem']: int(row["Agent's Answer"])}
 
-
-    results=open("ProblemResults.csv","w")
+    results = open("ProblemResults.csv", "w")
     results.write("Problem,Agent's Answer,Correct?,Correct Answer\n")
 
-    setResults=open("SetResults.csv","w")      
+    setResults = open("SetResults.csv", "w")
     setResults.write("Set,Correct,Incorrect,Skipped\n")
 
     with open(os.path.join("Problems", "ProblemSetList.txt")) as fd0:

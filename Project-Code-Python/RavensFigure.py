@@ -8,6 +8,7 @@
 
 import os
 
+
 class RavensFigure:
     # Creates a new figure for a Raven's Progressive Matrix given a name.
     #
@@ -28,13 +29,13 @@ class RavensFigure:
         # The numbers for the answer options will be randomly generated on each run
         # of the problem. The correct answer will remain the same, but its number
         # will change.
-        self.name=name
+        self.name = name
 
         # A dictionary of RavensObjects from the figure. RavensObjects within a figure
         # are given random names that are used in spatial relationships among figures.
         # For example, objects["a"] would return the object named 'a'.
-        self.objects={}
+        self.objects = {}
 
-        # The filename where your agent can find the imagistic representation of this
+        # The filename where your agent can find the image representation of this
         # figure as a .PNG file.
-        self.visualFilename="Problems" + os.sep + setName + os.sep + problemName + os.sep + name + ".png"
+        self.visualFilename = "Problems" + os.sep + setName + os.sep + problemName + os.sep + name + ".png"
