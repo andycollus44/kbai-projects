@@ -3,7 +3,7 @@ from collections import namedtuple
 
 import numpy as np
 
-from RavensTransformation import NoOpTransformation
+from RavensTransformation import FlipTransformation, MirrorTransformation, NoOpTransformation
 
 Transform = namedtuple('Transform', ['transformation', 'axis'])
 
@@ -93,16 +93,19 @@ class _Ravens2x2Solver(RavensProblemSolver):
     def _transforms(self):
         return [
             Transform(NoOpTransformation(), 0),
-            Transform(NoOpTransformation(), 1)
+            Transform(NoOpTransformation(), 1),
+            Transform(MirrorTransformation(), 0),
+            Transform(MirrorTransformation(), 1),
+            Transform(FlipTransformation(), 1)
         ]
 
     def _apply(self, matrix, transformation, axis):
         # The 'A' image
         image_1 = transformation.apply(matrix[0][0])
         # Either the 'B' image for row-wise or the 'C' image for column-wise
-        image_2 = transformation.apply(matrix[0][1]) if axis == 0 else transformation.apply(matrix[1][0])
+        image_2 = matrix[0][1] if axis == 0 else matrix[1][0]
 
-        # Compare the two transformed images to see if they match or not
+        # Compare the image with its pair to see if they match or not
         return super(_Ravens2x2Solver, self)._are_similar(image_1, image_2)
 
     def _find_answer(self, matrix, answers, transformation, axis):
