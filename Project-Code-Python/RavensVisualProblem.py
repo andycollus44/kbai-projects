@@ -33,10 +33,8 @@ class RavensVisualProblemFactory:
         return RavensVisualProblem(dimension, matrix, answers)
 
     def _process_image(self, image_file):
-        # Perform the following transformations to the image:
-        # 1. Convert to grayscale
-        # 2. Reduce size of the image to 32 x 32 so that operations are faster
-        return Image.open(image_file).convert('L').resize((32, 32), resample=Image.BICUBIC)
+        # Convert to grayscale
+        return Image.open(image_file).convert('L')
 
 
 class RavensVisualProblem:
