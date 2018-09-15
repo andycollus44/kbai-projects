@@ -109,7 +109,7 @@ class RavensShapeExtractor:
         # algorithm. So, anything that is not darker than 60 intensity value, i.e. very black, is considered white.
         # 60 was chosen arbitrarily after empirical experimentation
         # Reference: https://stackoverflow.com/a/50090612
-        image = image.copy().point(lambda x: 255 if x > 60 else 0).convert('1')
+        image = image.copy().point(lambda x: 255 if x > 60 else 0)
         # Also generate contours to be traced by the algorithm
         image = image.filter(ImageFilter.CONTOUR)
 
