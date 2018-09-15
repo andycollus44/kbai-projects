@@ -2,10 +2,10 @@
 This module contains classes to understand, operate and manipulate shapes inside Raven's figures.
 """
 
-import numpy as np
-from PIL import Image, ImageFilter
+import math
 
-from RavensFigure import RavensFigure
+import numpy as np
+from PIL import ImageFilter
 
 # Absolute directions
 _N = 0
@@ -38,6 +38,7 @@ class RavensShape:
     def __init__(self, points):
         self._points = points
         self._bbox = self._bounding_box()
+        self._moments = self._compute_moments()
 
     @property
     def points(self):
@@ -47,6 +48,18 @@ class RavensShape:
     def bbox(self):
         return self._bbox
 
+    @property
+    def area(self):
+        # The area of this shape computed via the raw moments
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Examples
+        return self._moments['m00']
+
+    @property
+    def centroid(self):
+        # The centroid of this shape computed via the raw moments
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Examples
+        return int(self._moments['m10'] / self._moments['m00']), int(self._moments['m01'] / self._moments['m00'])
+
     def _bounding_box(self):
         # Computes the bounding box for a set of points
         minx, miny = np.min(self._points, axis=0)
@@ -54,33 +67,51 @@ class RavensShape:
 
         return minx, miny, maxx, maxy
 
+    def _compute_moments(self):
+        # Computes the raw moments of this shape
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
+        return {
+            'm00': self._compute_moment(0, 0),
+            'm01': self._compute_moment(0, 1),
+            'm10': self._compute_moment(1, 0)
+        }
+
+    def _compute_moment(self, p, q):
+        # Pixel intensities are not needed to compute a raw moment because
+        # the contour of a shape is found via black pixels which are zeroes
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
+        return np.sum((self._points[:, 0] ** p) * (self._points[:, 1] ** q))
+
 
 class RavensShapeExtractor:
+    # These thresholds were chosen arbitrarily after empirical experimentation
     _MINIMUM_NUMBER_OF_POINTS = 10
+    _AREA_THRESHOLD = 50
+    _CENTROID_DISTANCE_THRESHOLD = 50
 
     def __init__(self):
         self._contour_tracer = _ContourTracer()
 
-    def apply(self, figure):
+    def apply(self, image):
         """
-        Extracts all shapes from the given figure.
+        Extracts all shapes from the given image.
 
-        :param figure: The figure to extract individual shapes from.
-        :type figure: RavensFigure
+        :param image: The image to extract individual shapes from.
+        :type image: PIL.Image.Image
         :return: A list of shapes
         :rtype: list[RavensShape]
         """
-        assert isinstance(figure, RavensFigure)
 
-        # Perform the following transformations to the image:
-        # 1. Convert to grayscale ('L')
-        # 2. Reduce size of the image to 32 x 32 so that operations are faster
-        # 3. Generate contours of shapes
-        # 4. Convert to bi-level (1's and 0's) for shape extraction
-        image = (Image.open(figure.visualFilename)
-                      .convert('L').resize((32, 32), resample=Image.BICUBIC)
-                      .filter(ImageFilter.CONTOUR)
-                      .convert('1'))
+        # Convert each image into a black and white bi-level representation using a custom threshold since Pillow
+        # dithers the image adding noise to it. A threshold of 60 was used because only the darkest contours should
+        # be kept which helps separating shapes that are "joined" by some lighter grayish pixels that to the human eye
+        # are white, but to the image processing library they are still darkish which affects the contour tracing
+        # algorithm. So, anything that is not darker than 60 intensity value, i.e. very black, is considered white.
+        # 60 was chosen arbitrarily after empirical experimentation
+        # Reference: https://stackoverflow.com/a/50090612
+        image = image.copy().point(lambda x: 255 if x > 60 else 0).convert('1')
+        # Also generate contours to be traced by the algorithm
+        image = image.filter(ImageFilter.CONTOUR)
 
         # Iteratively trace contours to extract shapes until no more contours are found
         shapes = []
@@ -96,10 +127,46 @@ class RavensShapeExtractor:
             points[contour[:, 1], contour[:, 0]] = 1
             shapes.append(contour)
 
-        # Post-process shapes by removing any "suspicious" shapes with very few amounts of points
-        shapes = filter(lambda x: len(x) > self._MINIMUM_NUMBER_OF_POINTS, shapes)
+        # No shapes present in the image!
+        if len(shapes) == 0:
+            return []
 
-        return [RavensShape(shape) for shape in shapes]
+        # Post-process shapes by removing any "suspicious" shapes with very few amounts of points
+        shapes = self._remove_small_shapes(shapes)
+        shapes = [RavensShape(shape) for shape in shapes]
+
+        # Finally, the contour tracing algorithm detects the inner and outer contours of an image when
+        # it is not filled; however, these two detected shapes belong to the same one and should be deduped
+        unique = self._dedupe_shapes(shapes)
+
+        return unique
+
+    def _remove_small_shapes(self, shapes):
+        return filter(lambda x: len(x) > self._MINIMUM_NUMBER_OF_POINTS, shapes)
+
+    def _dedupe_shapes(self, shapes):
+        # In order to dedupe, the centroid and the area of the shapes can be compared relative to each other,
+        # and the ones that are sufficiently close are deduped into a single shape
+
+        # Keep a stack of the unique shapes
+        unique = [shapes[0]]
+        for index in range(1, len(shapes)):
+            shape = shapes[index]
+            shape_cx, shape_cy = shape.centroid
+
+            current = unique[-1]
+            current_cx, current_cy = current.centroid
+
+            area_difference = abs(shape.area - current.area)
+            centroid_distance = math.sqrt((shape_cx - current_cx) ** 2 + (shape_cy - current_cy) ** 2)
+
+            if area_difference < self._AREA_THRESHOLD and centroid_distance < self._CENTROID_DISTANCE_THRESHOLD:
+                # This is probably a duplicated shape
+                continue
+
+            unique.append(shape)
+
+        return unique
 
 
 class _ContourTracer:
