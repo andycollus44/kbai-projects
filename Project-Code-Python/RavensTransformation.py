@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractmethod, abstractproperty
 
-from PIL import ImageChops, ImageFilter, ImageOps
+from PIL import ImageChops, ImageFilter, ImageOps, Image, ImageDraw
+
+from RavensShape import RavensShapeExtractor
 
 # Types of transformations with respect to the images they act on
 SINGLE = 'SINGLE'
@@ -90,6 +92,32 @@ class FlipTransformation(SingleTransformation):
 
     def apply(self, image, **kwargs):
         return ImageOps.flip(image)
+
+
+class ShapeFillTransformation(SingleTransformation):
+    """
+    A shape fill transformation looks at the shapes inside an image and fills them in.
+    """
+    def __init__(self):
+        self._shape_extractor = RavensShapeExtractor()
+
+    @property
+    def name(self):
+        return 'ShapeFill'
+
+    def apply(self, image, **kwargs):
+        # Extract shapes from the image
+        shapes = self._shape_extractor.apply(image)
+
+        # For each shape, reconstruct the polygons and fill them
+        reconstructed = Image.new('L', image.size, 255)
+        draw = ImageDraw.Draw(reconstructed)
+
+        for shape in shapes:
+            # The `polygon` function expects a flattened list of continuous x,y pairs
+            draw.polygon(shape.points.flatten().tolist(), fill=0, outline=255)
+
+        return reconstructed
 
 
 class XORTransformation(MultiTransformation):

@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, FlipTransformation, MirrorTransformation, NoOpTransformation,
-                                  XORTransformation)
+                                  ShapeFillTransformation, XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
 
@@ -99,6 +99,7 @@ class _Ravens2x2Solver(RavensProblemSolver):
             NoOpTransformation(),
             MirrorTransformation(),
             FlipTransformation(),
+            ShapeFillTransformation(),
             XORTransformation()
         ]
 
