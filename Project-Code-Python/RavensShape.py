@@ -30,6 +30,19 @@ _FL = 7  # Front-Left
 # Pixel intensities
 _BLACK = 0
 
+# Shapes
+BLOB = 'BLOB'
+TRIANGLE = 'TRIANGLE'
+SQUARE = 'SQUARE'
+RECTANGLE = 'RECTANGLE'
+PENTAGON = 'PENTAGON'
+HEXAGON = 'HEXAGON'
+HEPTAGON = 'HEPTAGON'
+OCTAGON = 'OCTAGON'
+NONAGON = 'NONAGON'
+DECAGON = 'DECAGON'
+CIRCLE = 'CIRCLE'
+
 
 class RavensShape:
     """
@@ -39,6 +52,9 @@ class RavensShape:
         self._points = points
         self._bbox = self._bounding_box()
         self._moments = self._compute_moments()
+        self._arc_length = self._perimeter()
+        self._shape = None
+        self._sides = 0
 
     @property
     def points(self):
@@ -59,6 +75,26 @@ class RavensShape:
         # The centroid of this shape computed via the raw moments
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Examples
         return int(self._moments['m10'] / self._moments['m00']), int(self._moments['m01'] / self._moments['m00'])
+
+    @property
+    def arclength(self):
+        return self._arc_length
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @shape.setter
+    def shape(self, value):
+        self._shape = value
+
+    @property
+    def sides(self):
+        return self._sides
+
+    @sides.setter
+    def sides(self, value):
+        self._sides = value
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
@@ -81,6 +117,22 @@ class RavensShape:
         # the contour of a shape is found via black pixels which are zeroes
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
         return np.sum((self._points[:, 0] ** p) * (self._points[:, 1] ** q))
+
+    def _perimeter(self):
+        # The perimeter of the contour, or arc length, is simply the sum of distances between all pairs of points
+        perimeter = 0
+        prev = self._points[0]
+
+        for index in range(1, len(self._points)):
+            point = self._points[index]
+            dx = point[0] - prev[0]
+            dy = point[1] - prev[1]
+
+            perimeter = perimeter + math.sqrt(dx ** 2 + dy ** 2)
+
+            prev = point
+
+        return perimeter
 
 
 class RavensShapeExtractor:
@@ -139,6 +191,10 @@ class RavensShapeExtractor:
         # it is not filled; however, these two detected shapes belong to the same one and should be deduped
         unique = self._dedupe_shapes(shapes)
 
+        # Now classify the unique shapes to find geometric relationships
+        for shape in unique:
+            shape.shape, shape.sides = _ShapeClassifier.classify(shape.points, shape.arclength)
+
         return unique
 
     def _remove_small_shapes(self, shapes):
@@ -167,6 +223,108 @@ class RavensShapeExtractor:
             unique.append(shape)
 
         return unique
+
+
+class _ShapeClassifier:
+    """
+    Implements a shape classifier based on contour approximation.
+    """
+    # Percentage of the original perimeter to keep chosen arbitrarily after empirical experimentation
+    _PERCENTAGE_OF_ORIGINAL_PERIMETER = 0.009
+
+    # Shapes with fixed number of vertices
+    _SHAPES = {
+        3: TRIANGLE,
+        5: PENTAGON,
+        6: HEXAGON,
+        7: HEPTAGON,
+        8: OCTAGON,
+        9: NONAGON,
+        10: DECAGON
+    }
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def classify(contour, perimeter):
+        """
+        Classifies a shape given a set of points (contour).
+
+        :param contour: The set of points describing the contour of the shape.
+        :type contour: list
+        :param perimeter: The arc length of the contour used for approximation.
+        :type perimeter: float
+        :return: A tuple (shape, sides)
+        :rtype: tuple
+        """
+        approx_contour = _ShapeClassifier._approximate_contour(contour, perimeter)
+        # Remove the last point since the contour is closed, and thus the last point is repeated
+        approx_contour = [(point[0], point[1]) for point in approx_contour[:-1]]
+
+        vertices = len(approx_contour)
+
+        # Classify the shape based on number of vertices, this assumes shapes are only geometric!
+        if vertices < 3:
+            # Unidentified object
+            return BLOB, -1
+
+        if vertices == 4:
+            # It is either a square or a rectangle, the aspect ratio of a square should be closer to one
+            aspect_ratio = _ShapeClassifier._aspect_ratio(approx_contour)
+            return (SQUARE, vertices) if 0.95 <= aspect_ratio <= 1.05 else (RECTANGLE, vertices)
+
+        if vertices > 10:
+            # Assume it is a circle which does not have any sides
+            return CIRCLE, 0
+
+        return _ShapeClassifier._SHAPES[vertices], vertices
+
+    @staticmethod
+    def _approximate_contour(contour, perimeter):
+        # Approximates the contour by implementing the Ramer-Douglas-Peucker algorithm
+        # Modified to be a vectorized version to leverage the power of Numpy
+        # Reference: https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm
+
+        # Find the point with the maximum distance to the line described by the first and the last points
+        distances = _ShapeClassifier._distance_to_line(contour, contour[0], contour[-1])
+        index = np.argmax(distances)
+        max_distance = distances[index]
+
+        # If the max distance is greater than epsilon, then recursively simplify the contour
+        if max_distance > _ShapeClassifier._PERCENTAGE_OF_ORIGINAL_PERIMETER * perimeter:
+            result_1 = _ShapeClassifier._approximate_contour(contour[:index + 1], perimeter)
+            result_2 = _ShapeClassifier._approximate_contour(contour[index:], perimeter)
+
+            # Merge
+            result = result_1[:-1] + result_2
+        else:
+            # Keep these points
+            result = [contour[0], contour[-1]]
+
+        return result
+
+    @staticmethod
+    def _distance_to_line(points, line1, line2):
+        # The distances from the points to a line defined by points `line1` and `line2`
+        # Reference: https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line#Line_defined_by_two_points
+
+        if np.all(line1 == line2):
+            # Handle closed contour cases where the points of the line are the same
+            # The norm of the vectors can be used as the distance
+            # Reference: https://tinyurl.com/y78klmch
+            return np.linalg.norm(points - line1, axis=1)
+
+        return np.divide(abs(np.cross(line2 - line1, line1 - points)), np.linalg.norm(line2 - line1))
+
+    @staticmethod
+    def _aspect_ratio(contour):
+        minx, miny = np.min(contour, axis=0)
+        maxx, maxy = np.max(contour, axis=0)
+        width = maxx - minx
+        height = maxy - miny
+
+        return float(width) / float(height)
 
 
 class _ContourTracer:
