@@ -3,6 +3,8 @@ This module contains classes to understand, operate and manipulate shapes inside
 """
 
 import math
+import uuid
+from collections import defaultdict
 
 import numpy as np
 from PIL import ImageFilter
@@ -43,12 +45,20 @@ NONAGON = 'NONAGON'
 DECAGON = 'DECAGON'
 CIRCLE = 'CIRCLE'
 
+# Relative positions
+INSIDE = 'INSIDE'
+RIGHT_OF = 'RIGHT_OF'
+LEFT_OF = 'LEFT_OF'
+ABOVE = 'ABOVE'
+BELOW = 'BELOW'
+
 
 class RavensShape:
     """
     Represents a shape in a Raven's figure.
     """
     def __init__(self, points):
+        self._label = str(uuid.uuid4())
         self._points = points
         self._bbox = self._bounding_box()
         self._raw_moments = self._compute_raw_moments()
@@ -57,6 +67,15 @@ class RavensShape:
         self._arc_length = self._perimeter()
         self._shape = None
         self._sides = 0
+        self._positions = {}
+
+    @property
+    def label(self):
+        return self._label
+
+    @label.setter
+    def label(self, value):
+        self._label = value
 
     @property
     def points(self):
@@ -102,6 +121,17 @@ class RavensShape:
     @property
     def hu_moments(self):
         return self._hu_moments
+
+    @property
+    def positions(self):
+        return self._positions
+
+    @positions.setter
+    def positions(self, value):
+        self._positions = value
+
+    def __repr__(self):
+        return 'RavensShape(label={}, shape={}, positions={})'.format(self.label, self.shape, self.positions)
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
@@ -257,6 +287,11 @@ class RavensShapeExtractor:
         # Now classify the unique shapes to find geometric relationships
         for shape in unique:
             shape.shape, shape.sides = _ShapeClassifier.classify(shape.points, shape.arclength)
+
+        # Find the relative positions of each shape with respect to the others
+        positions = _PositionFinder.apply(unique)
+        for shape in unique:
+            shape.positions = positions[shape.label]
 
         return unique
 
@@ -418,6 +453,79 @@ class _ShapeClassifier:
         height = maxy - miny
 
         return float(width) / float(height)
+
+
+class _PositionFinder:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def apply(shapes):
+        positions = {s.label: {} for s in shapes}
+
+        for shape in shapes:
+            shape_positions = defaultdict(list)
+
+            for other in shapes:
+                if shape.label == other.label:
+                    continue
+
+                if _PositionFinder._is_inside(other.bbox, shape.bbox):
+                    shape_positions[INSIDE].append(other.label)
+                elif _PositionFinder._is_right_of(other.bbox, shape.bbox):
+                    shape_positions[RIGHT_OF].append(other.label)
+                elif _PositionFinder._is_left_of(other.bbox, shape.bbox):
+                    shape_positions[LEFT_OF].append(other.label)
+                elif _PositionFinder._is_right_of(other.bbox, shape.bbox):
+                    shape_positions[RIGHT_OF].append(other.label)
+                elif _PositionFinder._is_above(other.bbox, shape.bbox):
+                    shape_positions[ABOVE].append(other.label)
+                elif _PositionFinder._is_below(other.bbox, shape.bbox):
+                    shape_positions[BELOW].append(other.label)
+
+            positions[shape.label] = dict(shape_positions.copy())
+
+        return positions
+
+    @staticmethod
+    def _is_inside(bbox1, bbox2):
+        # Determines whether the bounding box `bbox2` is inside `bbox1`
+        minx_1, miny_1, maxx_1, maxy_1 = bbox1
+        minx_2, miny_2, maxx_2, maxy_2 = bbox2
+
+        return minx_2 >= minx_1 and maxx_2 <= maxx_1 and miny_2 >= miny_1 and maxy_2 <= maxy_1
+
+    @staticmethod
+    def _is_right_of(bbox1, bbox2):
+        # Determines whether the bounding box `bbox2` is right of `bbox1`
+        _, _, maxx_1, _ = bbox1
+        minx_2, _, _, _ = bbox2
+
+        return minx_2 >= maxx_1
+
+    @staticmethod
+    def _is_left_of(bbox1, bbox2):
+        # Determines whether the bounding box `bbox2` is left of `bbox1`
+        minx_1, _, _, _ = bbox1
+        _, _, maxx_2, _ = bbox2
+
+        return maxx_2 <= minx_1
+
+    @staticmethod
+    def _is_above(bbox1, bbox2):
+        # Determines whether the bounding box `bbox2` is above `bbox1`
+        _, miny_1, _, _ = bbox1
+        _, _, _, maxy_2 = bbox2
+
+        return maxy_2 <= miny_1
+
+    @staticmethod
+    def _is_below(bbox1, bbox2):
+        # Determines whether the bounding box `bbox2` is below `bbox1`
+        _, _, _, maxy_1 = bbox1
+        _, miny_2, _, _ = bbox2
+
+        return miny_2 >= maxy_1
 
 
 class _ContourTracer:
