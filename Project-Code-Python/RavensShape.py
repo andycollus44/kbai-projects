@@ -4,7 +4,7 @@ This module contains classes to understand, operate and manipulate shapes inside
 
 import math
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import numpy as np
 from PIL import ImageFilter
@@ -68,6 +68,7 @@ class RavensShape:
         self._shape = None
         self._sides = 0
         self._positions = {}
+        self._filled = False
 
     @property
     def label(self):
@@ -130,8 +131,17 @@ class RavensShape:
     def positions(self, value):
         self._positions = value
 
+    @property
+    def filled(self):
+        return self._filled
+
+    @filled.setter
+    def filled(self, value):
+        self._filled = value
+
     def __repr__(self):
-        return 'RavensShape(label={}, shape={}, positions={})'.format(self.label, self.shape, self.positions)
+        return 'RavensShape(label={}, shape={}, filled={}, positions={})'.format(self.label, self.shape, self.filled,
+                                                                                 self.positions)
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
@@ -254,13 +264,13 @@ class RavensShapeExtractor:
         # algorithm. So, anything that is not darker than 60 intensity value, i.e. very black, is considered white.
         # 60 was chosen arbitrarily after empirical experimentation
         # Reference: https://stackoverflow.com/a/50090612
-        image = image.copy().point(lambda x: 255 if x > 60 else 0)
+        binary_image = image.copy().point(lambda x: 255 if x > 60 else 0)
         # Also generate contours to be traced by the algorithm
-        image = image.filter(ImageFilter.CONTOUR)
+        binary_contour = binary_image.filter(ImageFilter.CONTOUR)
 
         # Iteratively trace contours to extract shapes until no more contours are found
         shapes = []
-        points = np.array(image).astype(np.int)
+        points = np.array(binary_contour).astype(np.int)
 
         while True:
             contour = self._contour_tracer.apply(points)
@@ -280,18 +290,12 @@ class RavensShapeExtractor:
         shapes = self._remove_small_shapes(shapes)
         shapes = [RavensShape(shape) for shape in shapes]
 
-        # Finally, the contour tracing algorithm detects the inner and outer contours of an image when
+        # The contour tracing algorithm detects the inner and outer contours of an image when
         # it is not filled; however, these two detected shapes belong to the same one and should be deduped
         unique = self._dedupe_shapes(shapes)
 
-        # Now classify the unique shapes to find geometric relationships
-        for shape in unique:
-            shape.shape, shape.sides = _ShapeClassifier.classify(shape.points, shape.arclength)
-
-        # Find the relative positions of each shape with respect to the others
-        positions = _PositionFinder.apply(unique)
-        for shape in unique:
-            shape.positions = positions[shape.label]
+        # Finally, compute some other attributes for all the shapes
+        self._compute_attributes(unique, binary_image)
 
         return unique
 
@@ -321,6 +325,20 @@ class RavensShapeExtractor:
             unique.append(shape)
 
         return unique
+
+    def _compute_attributes(self, shapes, image):
+        positions = _PositionFinder.apply(shapes)
+
+        for shape in shapes:
+            # Find the relative positions of each shape with respect to the others
+            shape.positions = positions[shape.label]
+            # Classify the unique shapes to find geometric relationships
+            shape.shape, shape.sides = _ShapeClassifier.classify(shape.points, shape.arclength)
+
+        # Analyze "filled-ness" for the shapes which has to be done after all positions are computed,
+        # see `_FilledAnalyzer.apply()` for an explanation of this
+        for index, shape in enumerate(shapes):
+            shape.filled = _FilledAnalyzer.apply(shape, shapes[index + 1:], image)
 
 
 class RavensShapeMatcher:
@@ -456,11 +474,22 @@ class _ShapeClassifier:
 
 
 class _PositionFinder:
+    """
+    Implements a position finder for a shape based on bounding boxes.
+    """
     def __init__(self):
         pass
 
     @staticmethod
     def apply(shapes):
+        """
+        Finds all the positions for each shape with respect to the others.
+
+        :param shapes: The shapes to find positions for.
+        :type shapes: list[RavensShape]
+        :return: A dictionary keyed by shape label with all positions.
+        :rtype: dict
+        """
         positions = {s.label: {} for s in shapes}
 
         for shape in shapes:
@@ -526,6 +555,103 @@ class _PositionFinder:
         _, miny_2, _, _ = bbox2
 
         return miny_2 >= maxy_1
+
+
+class _FilledAnalyzer:
+    """
+    Implements an analyzer for the 'filled' attribute of a shape.
+    """
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def apply(shape, other_shapes, image):
+        """
+        Determines whether the given shape is filled or not in the original image.
+
+        :param shape: The shape to determine its 'filled' attribute for.
+        :type shape: RavensShape
+        :param other_shapes: The other shapes from the same image.
+        :type other_shapes: list[RavensShape]
+        :param image: The original image, as a bi-level representation.
+        :type image: PIL.Image.Image
+        :return: True if the shape is filled, False otherwise.
+        :rtype: bool
+        """
+        original = np.array(image.copy()).astype(np.int)
+
+        # Step 1
+        # Find any shapes that are inside the given shape
+        inside_shapes = filter(lambda s: shape.label in s.positions.get(INSIDE, []), other_shapes)
+
+        # Step 2
+        # Make any inside shapes black (i.e. fill the shapes)
+        for inside in inside_shapes:
+            area = _ContourAreaFinder.apply(inside)
+            # In the image matrix, the row is the y-coordinate, while the column is the x-coordinate
+            original[area[:, 1], area[:, 0]] = 0
+
+        # Step 3
+        # If all the points inside the given shape are black, then it means it was originally filled,
+        # this comes the fact that if all the shapes inside are black, and the given shape is also black,
+        # then the whole area will become black. If the shape is actually not filled, then there will be
+        # a portion of the pixels that are white amongst all the other black ones
+        area = _ContourAreaFinder.apply(shape)
+        filled = np.all(original[area[:, 1], area[:, 0]] == 0)
+
+        return filled
+
+
+class _ContourAreaFinder:
+    """
+    Implements a contour area finder based on a simple BFS.
+
+    Reference: http://answers.opencv.org/question/45968/getting-area-points-inside-contour/ (see 3rd comment)
+    """
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def apply(shape):
+        """
+        Finds the area inside the contour, as a set of all points, for the given shape.
+
+        :param shape: The shape to finds its contour area for.
+        :type shape: RavensShape
+        :return: All the points inside the contour area.
+        :rtype: numpy.ndarray
+        """
+        # Convert the contour into a set of points for faster membership checks
+        contour = set([(p[0], p[1]) for p in shape.points])
+        centroid = shape.centroid
+
+        area = []
+
+        # Start in the centroid of the shape
+        queue = deque()
+        queue.append(centroid)
+        visited = set()
+
+        while len(queue) > 0:
+            point = queue.pop()
+
+            # The point is part of the contour or has been visited, stop here
+            if point in contour or point in visited:
+                continue
+
+            # Add it to the area
+            area.append(point)
+            visited.add(point)
+
+            # Find all 4 neighbors (up, down, left, right) assuming (0,0) being the top left corner in the plane
+            x, y = point
+            for neighbor in [(x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)]:
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        return np.array(area)
 
 
 class _ContourTracer:
