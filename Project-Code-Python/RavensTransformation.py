@@ -115,7 +115,7 @@ class ShapeFillTransformation(SingleTransformation):
 
         for shape in shapes:
             # The `polygon` function expects a flattened list of continuous x,y pairs
-            draw.polygon(shape.points.flatten().tolist(), fill=0, outline=255)
+            draw.polygon(shape.contour.flatten().tolist(), fill=0, outline=255)
 
         return reconstructed
 

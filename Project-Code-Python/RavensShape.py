@@ -57,13 +57,12 @@ class RavensShape:
     """
     Represents a shape in a Raven's figure.
     """
-    def __init__(self, points):
+    def __init__(self, contour):
         self._label = str(uuid.uuid4())
-        self._points = points
+        self._contour = contour
+        self._area_points = None
         self._bbox = self._bounding_box()
-        self._raw_moments = self._compute_raw_moments()
-        self._central_moments = self._compute_central_moments()
-        self._hu_moments = self._compute_hu_moments()
+        self._moments = {}
         self._arc_length = self._perimeter()
         self._shape = None
         self._sides = 0
@@ -79,25 +78,41 @@ class RavensShape:
         self._label = value
 
     @property
-    def points(self):
-        return self._points
+    def contour(self):
+        return self._contour
+
+    @property
+    def area_points(self):
+        return self._area_points
+
+    @area_points.setter
+    def area_points(self, value):
+        self._area_points = value
 
     @property
     def bbox(self):
         return self._bbox
 
     @property
+    def moments(self):
+        return self._moments
+
+    @moments.setter
+    def moments(self, value):
+        self._moments = value
+
+    @property
     def area(self):
         # The area of this shape computed via the raw moments
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Examples
-        return self._raw_moments['m00']
+        return self.moments['raw']['m00']
 
     @property
     def centroid(self):
         # The centroid of this shape computed via the raw moments
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Examples
-        return (int(self._raw_moments['m10'] / self._raw_moments['m00']),
-                int(self._raw_moments['m01'] / self._raw_moments['m00']))
+        return (int(self.moments['raw']['m10'] / self.moments['raw']['m00']),
+                int(self.moments['raw']['m01'] / self.moments['raw']['m00']))
 
     @property
     def arclength(self):
@@ -121,7 +136,7 @@ class RavensShape:
 
     @property
     def hu_moments(self):
-        return self._hu_moments
+        return self.moments['hu']
 
     @property
     def positions(self):
@@ -145,18 +160,18 @@ class RavensShape:
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
-        minx, miny = np.min(self._points, axis=0)
-        maxx, maxy = np.max(self._points, axis=0)
+        minx, miny = np.min(self._contour, axis=0)
+        maxx, maxy = np.max(self._contour, axis=0)
 
         return minx, miny, maxx, maxy
 
     def _perimeter(self):
         # The perimeter of the contour, or arc length, is simply the sum of distances between all pairs of points
         perimeter = 0
-        prev = self._points[0]
+        prev = self._contour[0]
 
-        for index in range(1, len(self._points)):
-            point = self._points[index]
+        for index in range(1, len(self._contour)):
+            point = self._contour[index]
             dx = point[0] - prev[0]
             dy = point[1] - prev[1]
 
@@ -165,77 +180,6 @@ class RavensShape:
             prev = point
 
         return perimeter
-
-    def _compute_raw_moments(self):
-        # Computes the raw moments of this shape
-        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
-        return {
-            'm00': self._compute_raw_moment(0, 0),
-            'm01': self._compute_raw_moment(0, 1),
-            'm10': self._compute_raw_moment(1, 0),
-            'm11': self._compute_raw_moment(1, 1),
-            'm12': self._compute_raw_moment(1, 2),
-            'm02': self._compute_raw_moment(0, 2),
-            'm20': self._compute_raw_moment(2, 0),
-            'm21': self._compute_raw_moment(2, 1),
-            'm03': self._compute_raw_moment(0, 3),
-            'm30': self._compute_raw_moment(3, 0)
-        }
-
-    def _compute_central_moments(self):
-        # Computes the central moments of this shape
-        # Reference: https://en.wikipedia.org/wiki/Image_moment#Central_moments
-        cx, cy = self.centroid
-
-        return {
-            'mu00': self._raw_moments['m00'],
-            'mu01': 0,
-            'mu10': 0,
-            'mu11': self._raw_moments['m11'] - cx * self._raw_moments['m01'],
-            'mu20': self._raw_moments['m20'] - cx * self._raw_moments['m10'],
-            'mu02': self._raw_moments['m02'] - cy * self._raw_moments['m01'],
-            'mu21': (self._raw_moments['m21'] - 2 * cx * self._raw_moments['m11'] - cy * self._raw_moments['m20'] +
-                     2 * cx * cx * self._raw_moments['m01']),
-            'mu12': (self._raw_moments['m12'] - 2 * cy * self._raw_moments['m11'] - cx * self._raw_moments['m02'] +
-                     2 * cy * cy * self._raw_moments['m10']),
-            'mu30': (self._raw_moments['m30'] - 3 * cx * self._raw_moments['m20'] +
-                     2 * cx * cx * self._raw_moments['m10']),
-            'mu03': (self._raw_moments['m03'] - 3 * cy * self._raw_moments['m02'] +
-                     2 * cy * cy * self._raw_moments['m01'])
-        }
-
-    def _compute_hu_moments(self):
-        # Computes the Hu moments of this shape
-        # Reference: https://en.wikipedia.org/wiki/Image_moment#Moment_invariants
-        n02 = self._compute_invariant(0, 2)
-        n03 = self._compute_invariant(0, 3)
-        n11 = self._compute_invariant(1, 1)
-        n12 = self._compute_invariant(1, 2)
-        n20 = self._compute_invariant(2, 0)
-        n21 = self._compute_invariant(2, 1)
-        n30 = self._compute_invariant(3, 0)
-
-        return [
-            n20 + n02,
-            (n20 - n02) ** 2 + 4 * n11 * n11,
-            (n30 - 3 * n12) ** 2 + (3 * n21 - n03) ** 2,
-            (n30 + n12) ** 2 + (n21 + n03) ** 2,
-            ((n30 - 3 * n12) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2) +
-             (3 * n21 - n03) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2)),
-            (n20 - n02) * ((n30 + n12) ** 2 - (n21 + n03) ** 2) + 4 * n11 * (n30 + n12) * (n21 + n03),
-            ((3 * n21 - n03) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2) -
-             (n30 - 3 * n12) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2))
-        ]
-
-    def _compute_raw_moment(self, p, q):
-        # Pixel intensities are not needed to compute a raw moment because
-        # the contour of a shape is found via black pixels which are zeroes
-        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
-        return np.sum((self._points[:, 0] ** p) * (self._points[:, 1] ** q))
-
-    def _compute_invariant(self, i, j):
-        # Reference: https://en.wikipedia.org/wiki/Image_moment#Scale_invariants
-        return self._central_moments['mu{}{}'.format(i, j)] / math.pow(self._central_moments['mu00'], (1 + (i + j) / 2))
 
 
 class RavensShapeExtractor:
@@ -290,6 +234,13 @@ class RavensShapeExtractor:
         shapes = self._remove_small_shapes(shapes)
         shapes = [RavensShape(shape) for shape in shapes]
 
+        # Compute the shapes' moments and the area points
+        for shape in shapes:
+            # Find all the points that lie inside the area described by the contour of the shape
+            shape.area_points = _ContourAreaFinder.apply(shape)
+            # Compute the shape's moments
+            shape.moments = _Moments.compute(shape, image)
+
         # The contour tracing algorithm detects the inner and outer contours of an image when
         # it is not filled; however, these two detected shapes belong to the same one and should be deduped
         unique = self._dedupe_shapes(shapes)
@@ -333,10 +284,10 @@ class RavensShapeExtractor:
             # Find the relative positions of each shape with respect to the others
             shape.positions = positions[shape.label]
             # Classify the unique shapes to find geometric relationships
-            shape.shape, shape.sides = _ShapeClassifier.classify(shape.points, shape.arclength)
+            shape.shape, shape.sides = _ShapeClassifier.classify(shape.contour, shape.arclength)
 
-        # Analyze "filled-ness" for the shapes which has to be done after all positions are computed,
-        # see `_FilledAnalyzer.apply()` for an explanation of this
+        # Analyze "filled-ness" for the shapes which has to be done after all positions are computed
+        # and the area points are obtained, see `_FilledAnalyzer.apply()` for an explanation of this
         for index, shape in enumerate(shapes):
             shape.filled = _FilledAnalyzer.apply(shape, shapes[index + 1:], image)
 
@@ -588,7 +539,7 @@ class _FilledAnalyzer:
         # Step 2
         # Make any inside shapes black (i.e. fill the shapes)
         for inside in inside_shapes:
-            area = _ContourAreaFinder.apply(inside)
+            area = inside.area_points
             # In the image matrix, the row is the y-coordinate, while the column is the x-coordinate
             original[area[:, 1], area[:, 0]] = 0
 
@@ -597,7 +548,7 @@ class _FilledAnalyzer:
         # this comes the fact that if all the shapes inside are black, and the given shape is also black,
         # then the whole area will become black. If the shape is actually not filled, then there will be
         # a portion of the pixels that are white amongst all the other black ones
-        area = _ContourAreaFinder.apply(shape)
+        area = shape.area_points
         filled = np.all(original[area[:, 1], area[:, 0]] == 0)
 
         return filled
@@ -624,8 +575,10 @@ class _ContourAreaFinder:
         :rtype: numpy.ndarray
         """
         # Convert the contour into a set of points for faster membership checks
-        contour = set([(p[0], p[1]) for p in shape.points])
-        centroid = shape.centroid
+        contour = set([(p[0], p[1]) for p in shape.contour])
+        # Use an approximation of the centroid of the shape via its bounding box
+        minx, miny, maxx, maxy = shape.bbox
+        centroid = int((minx + maxx) / 2), int((maxy + miny) / 2.)
 
         area = []
 
@@ -652,6 +605,121 @@ class _ContourAreaFinder:
                     queue.append(neighbor)
 
         return np.array(area)
+
+
+class _Moments:
+    """
+    Implements a class for computing image moments.
+    """
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def compute(shape, image):
+        """
+        Computes the raw, central and Hu moments for the given shape.
+
+        :param shape: The shape to compute moments for.
+        :type shape: RavensShape
+        :param image: The original image.
+        :type image: PIL.Image.Image
+        :return: The raw, central and Hu moments as a dictionary with keys: 'raw', 'central', 'hu'
+                 where 'raw' and 'central' are dictionaries, and 'hu' is a list.
+        :rtype: dict
+        """
+        image = np.array(image.copy()).astype(np.int)
+
+        # Binarize the image by setting all points of the shape to 1 and everything else to 0
+        image[:, :] = 0
+        image[shape.contour[:, 1], shape.contour[:, 0]] = 1
+        image[shape.area_points[:, 1], shape.area_points[:, 0]] = 1
+
+        raw_moments = _Moments._compute_raw_moments(shape, image)
+        central_moments = _Moments._compute_central_moments(raw_moments)
+        hu_moments = _Moments._compute_hu_moments(central_moments)
+
+        return {
+            'raw': raw_moments,
+            'central': central_moments,
+            'hu': hu_moments
+        }
+
+    @staticmethod
+    def _compute_raw_moments(shape, image):
+        # Computes the raw moments of the given shape
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
+
+        return {
+            'm00': _Moments._compute_raw_moment(shape, image, 0, 0),
+            'm01': _Moments._compute_raw_moment(shape, image, 0, 1),
+            'm10': _Moments._compute_raw_moment(shape, image, 1, 0),
+            'm11': _Moments._compute_raw_moment(shape, image, 1, 1),
+            'm12': _Moments._compute_raw_moment(shape, image, 1, 2),
+            'm02': _Moments._compute_raw_moment(shape, image, 0, 2),
+            'm20': _Moments._compute_raw_moment(shape, image, 2, 0),
+            'm21': _Moments._compute_raw_moment(shape, image, 2, 1),
+            'm03': _Moments._compute_raw_moment(shape, image, 0, 3),
+            'm30': _Moments._compute_raw_moment(shape, image, 3, 0)
+        }
+
+    @staticmethod
+    def _compute_central_moments(raw_moments):
+        # Computes the central moments of the shape
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Central_moments
+        cx, cy = (int(raw_moments['m10'] / raw_moments['m00']),
+                  int(raw_moments['m01'] / raw_moments['m00']))
+
+        return {
+            'mu00': raw_moments['m00'],
+            'mu01': 0,
+            'mu10': 0,
+            'mu11': raw_moments['m11'] - cx * raw_moments['m01'],
+            'mu20': raw_moments['m20'] - cx * raw_moments['m10'],
+            'mu02': raw_moments['m02'] - cy * raw_moments['m01'],
+            'mu21': (raw_moments['m21'] - 2 * cx * raw_moments['m11'] - cy * raw_moments['m20'] +
+                     2 * cx * cx * raw_moments['m01']),
+            'mu12': (raw_moments['m12'] - 2 * cy * raw_moments['m11'] - cx * raw_moments['m02'] +
+                     2 * cy * cy * raw_moments['m10']),
+            'mu30': raw_moments['m30'] - 3 * cx * raw_moments['m20'] + 2 * cx * cx * raw_moments['m10'],
+            'mu03': raw_moments['m03'] - 3 * cy * raw_moments['m02'] + 2 * cy * cy * raw_moments['m01']
+        }
+
+    @staticmethod
+    def _compute_hu_moments(central_moments):
+        # Computes the Hu moments of the shape
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Moment_invariants
+        n02 = _Moments._compute_invariant(central_moments, 0, 2)
+        n03 = _Moments._compute_invariant(central_moments, 0, 3)
+        n11 = _Moments._compute_invariant(central_moments, 1, 1)
+        n12 = _Moments._compute_invariant(central_moments, 1, 2)
+        n20 = _Moments._compute_invariant(central_moments, 2, 0)
+        n21 = _Moments._compute_invariant(central_moments, 2, 1)
+        n30 = _Moments._compute_invariant(central_moments, 3, 0)
+
+        return [
+            n20 + n02,
+            (n20 - n02) ** 2 + 4 * n11 * n11,
+            (n30 - 3 * n12) ** 2 + (3 * n21 - n03) ** 2,
+            (n30 + n12) ** 2 + (n21 + n03) ** 2,
+            ((n30 - 3 * n12) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2) +
+             (3 * n21 - n03) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2)),
+            (n20 - n02) * ((n30 + n12) ** 2 - (n21 + n03) ** 2) + 4 * n11 * (n30 + n12) * (n21 + n03),
+            ((3 * n21 - n03) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2) -
+             (n30 - 3 * n12) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2))
+        ]
+
+    @staticmethod
+    def _compute_raw_moment(shape, image, p, q):
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
+        x, y = shape.contour[:, 1], shape.contour[:, 0]
+
+        return np.sum((x ** p) * (y ** q) * image[x, y])
+
+    @staticmethod
+    def _compute_invariant(central_moments, i, j):
+        # Reference: https://en.wikipedia.org/wiki/Image_moment#Scale_invariants
+        return central_moments['mu{}{}'.format(i, j)] / math.pow(central_moments['mu00'], (1 + (i + j) / 2))
 
 
 class _ContourTracer:
