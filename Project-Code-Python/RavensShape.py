@@ -1,7 +1,6 @@
 """
 This module contains classes to understand, operate and manipulate shapes inside Raven's figures.
 """
-
 import math
 import uuid
 from collections import defaultdict, deque
@@ -41,8 +40,6 @@ PENTAGON = 'PENTAGON'
 HEXAGON = 'HEXAGON'
 HEPTAGON = 'HEPTAGON'
 OCTAGON = 'OCTAGON'
-NONAGON = 'NONAGON'
-DECAGON = 'DECAGON'
 CIRCLE = 'CIRCLE'
 
 # Relative positions
@@ -340,7 +337,9 @@ class _ShapeClassifier:
     Implements a shape classifier based on contour approximation.
     """
     # Percentage of the original perimeter to keep chosen arbitrarily after empirical experimentation
-    _PERCENTAGE_OF_ORIGINAL_PERIMETER = 0.009
+    _PERCENTAGE_OF_ORIGINAL_PERIMETER = 0.015
+    # Number of points to resample for the contour chose arbitrarily after empirical experimentation
+    _RESAMPLING = 128
 
     # Shapes with fixed number of vertices
     _SHAPES = {
@@ -348,9 +347,7 @@ class _ShapeClassifier:
         5: PENTAGON,
         6: HEXAGON,
         7: HEPTAGON,
-        8: OCTAGON,
-        9: NONAGON,
-        10: DECAGON
+        8: OCTAGON
     }
 
     def __init__(self):
@@ -368,7 +365,13 @@ class _ShapeClassifier:
         :return: A tuple (shape, sides)
         :rtype: tuple
         """
-        approx_contour = _ShapeClassifier._approximate_contour(contour, perimeter)
+        # Pre-process the contour by resampling the number of points to reduce noise
+        resampled_contour = _ShapeClassifier._resample(contour, perimeter, _ShapeClassifier._RESAMPLING)
+        # Now approximate the contour with the new resampled points, the new perimeter also needs to be computed
+        approx_contour = _ShapeClassifier._approximate_contour(resampled_contour,
+                                                               _ShapeClassifier._perimeter(resampled_contour))
+        # Post-process the approximated points by merging points that are close to each other
+        approx_contour = _ShapeClassifier._merge(approx_contour)
         # Remove the last point since the contour is closed, and thus the last point is repeated
         approx_contour = [(point[0], point[1]) for point in approx_contour[:-1]]
 
@@ -384,11 +387,45 @@ class _ShapeClassifier:
             aspect_ratio = _ShapeClassifier._aspect_ratio(approx_contour)
             return (SQUARE, vertices) if 0.95 <= aspect_ratio <= 1.05 else (RECTANGLE, vertices)
 
-        if vertices > 10:
+        if vertices > 8:
             # Assume it is a circle which does not have any sides
             return CIRCLE, 0
 
         return _ShapeClassifier._SHAPES[vertices], vertices
+
+    @staticmethod
+    def _resample(contour, perimeter, n):
+        # Resamples the contour to have `n` equally distributed points
+        # by following the proposed technique by Wobbrock et. al in their $1 Recognizer Algorithm
+        # Reference: http://faculty.washington.edu/wobbrock/pubs/uist-07.01.pdf
+
+        points = contour.tolist()
+        threshold = perimeter / (n - 1)
+        D = 0
+        resampled = [(points[0][0], points[0][1])]
+
+        index = 1
+
+        while index < len(points):
+            point = points[index]
+            prev = points[index - 1]
+            d = math.sqrt((prev[0] - point[0]) ** 2 + (prev[1] - point[1]) ** 2)
+
+            if (D + d) >= threshold:
+                qx = prev[0] + ((threshold - D) / d) * (point[0] - prev[0])
+                qy = prev[1] + ((threshold - D) / d) * (point[1] - prev[1])
+
+                resampled.append((qx, qy))
+                # q will be the next point
+                points.insert(index + 1, (qx, qy))
+
+                D = 0
+            else:
+                D = D + d
+
+            index = index + 1
+
+        return np.array(resampled)
 
     @staticmethod
     def _approximate_contour(contour, perimeter):
@@ -415,6 +452,29 @@ class _ShapeClassifier:
         return result
 
     @staticmethod
+    def _merge(contour):
+        # Keep a stack of the latest point
+        merged = [contour[0]]
+
+        for index in range(1, len(contour)):
+            point = contour[index]
+            current = merged[-1]
+            distance = math.sqrt((point[0] - current[0]) ** 2 + (point[1] - current[1]) ** 2)
+
+            if distance <= 5:
+                # Merge these points together by obtaining the middle point
+                middle_point = int((point[0] + current[0]) / 2), int((point[1] + current[1]) / 2)
+                # Remove the current point and replace it with the middle point
+                merged.pop()
+                merged.append(middle_point)
+                continue
+
+            # This point does not need to be merged
+            merged.append(point)
+
+        return merged
+
+    @staticmethod
     def _distance_to_line(points, line1, line2):
         # The distances from the points to a line defined by points `line1` and `line2`
         # Reference: https://en.wikipedia.org/wiki/Distance_from_a_point_to_a_line#Line_defined_by_two_points
@@ -435,6 +495,22 @@ class _ShapeClassifier:
         height = maxy - miny
 
         return float(width) / float(height)
+
+    @staticmethod
+    def _perimeter(contour):
+        perimeter = 0
+        prev = contour[0]
+
+        for index in range(1, len(contour)):
+            point = contour[index]
+            dx = point[0] - prev[0]
+            dy = point[1] - prev[1]
+
+            perimeter = perimeter + math.sqrt(dx ** 2 + dy ** 2)
+
+            prev = point
+
+        return perimeter
 
 
 class _PositionFinder:
