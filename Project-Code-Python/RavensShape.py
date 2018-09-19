@@ -192,7 +192,7 @@ class RavensShape:
 class RavensShapeExtractor:
     # These thresholds were chosen arbitrarily after empirical experimentation
     _MINIMUM_NUMBER_OF_POINTS = 10
-    _AREA_THRESHOLD = 50
+    _PERIMETER_THRESHOLD = 50
     _CENTROID_DISTANCE_THRESHOLD = 50
 
     def __init__(self):
@@ -261,23 +261,29 @@ class RavensShapeExtractor:
         return filter(lambda x: len(x) > self._MINIMUM_NUMBER_OF_POINTS, shapes)
 
     def _dedupe_shapes(self, shapes):
-        # In order to dedupe, the centroid and the area of the shapes can be compared relative to each other,
+        # In order to dedupe, the centroid and the perimeter of the shapes can be compared relative to each other,
         # and the ones that are sufficiently close are deduped into a single shape
 
-        # Keep a stack of the unique shapes
         unique = [shapes[0]]
         for index in range(1, len(shapes)):
             shape = shapes[index]
             shape_cx, shape_cy = shape.centroid
 
-            current = unique[-1]
-            current_cx, current_cy = current.centroid
+            # Check that the shape is not similar to any of the unique shapes identified so far
+            is_duplicate = False
 
-            area_difference = abs(shape.area - current.area)
-            centroid_distance = math.sqrt((shape_cx - current_cx) ** 2 + (shape_cy - current_cy) ** 2)
+            for current in unique:
+                current_cx, current_cy = current.centroid
 
-            if area_difference < self._AREA_THRESHOLD and centroid_distance < self._CENTROID_DISTANCE_THRESHOLD:
-                # This is probably a duplicated shape
+                perimeter_diff = abs(shape.arclength - current.arclength)
+                centroid_distance = math.sqrt((shape_cx - current_cx) ** 2 + (shape_cy - current_cy) ** 2)
+
+                if perimeter_diff < self._PERIMETER_THRESHOLD and centroid_distance < self._CENTROID_DISTANCE_THRESHOLD:
+                    # This is probably a duplicated shape
+                    is_duplicate = True
+                    break
+
+            if is_duplicate:
                 continue
 
             unique.append(shape)
@@ -547,6 +553,9 @@ class _FilledAnalyzer:
         # Make any inside shapes black (i.e. fill the shapes)
         for inside in inside_shapes:
             area = inside.area_points
+            # If the shape does not have an area, skip it; this could happen for lines, for example
+            if len(area) == 0:
+                continue
             # In the image matrix, the row is the y-coordinate, while the column is the x-coordinate
             original[area[:, 1], area[:, 0]] = 0
 
@@ -554,9 +563,12 @@ class _FilledAnalyzer:
         # If all the points inside the given shape are black, then it means it was originally filled,
         # this comes the fact that if all the shapes inside are black, and the given shape is also black,
         # then the whole area will become black. If the shape is actually not filled, then there will be
-        # a portion of the pixels that are white amongst all the other black ones
+        # a portion of the pixels that are white amongst all the other black ones. However, make sure
+        # the shape actually has an area, it could happen that the area was not detected for this shape.
+        # An example of this is the figures in Challenge Problem B-09 which is filled with lines instead
+        # of a solid pattern!
         area = shape.area_points
-        filled = np.all(original[area[:, 1], area[:, 0]] == 0)
+        filled = len(area) > 0 and np.all(original[area[:, 1], area[:, 0]] == 0)
 
         return filled
 
@@ -583,9 +595,8 @@ class _ContourAreaFinder:
         """
         # Convert the contour into a set of points for faster membership checks
         contour = set([(p[0], p[1]) for p in shape.contour])
-        # Use an approximation of the centroid of the shape via its bounding box
-        minx, miny, maxx, maxy = shape.bbox
-        centroid = int((minx + maxx) / 2), int((maxy + miny) / 2.)
+        # Use an approximation of the centroid of the shape via its contour
+        centroid = int(np.mean(shape.contour[:, 0])), int(np.mean(shape.contour[:, 1]))
 
         area = []
 
@@ -639,10 +650,12 @@ class _Moments:
 
         # Binarize the image by setting all points of the shape to 1 and everything else to 0
         image[:, :] = 0
-        image[shape.contour[:, 1], shape.contour[:, 0]] = 1
-        image[shape.area_points[:, 1], shape.area_points[:, 0]] = 1
+        # Use the area of the shape, but if not available, then default to the contour,
+        # this could happen when the shape extracted is a single line
+        points = shape.area_points if len(shape.area_points) > 0 else shape.contour
+        image[points[:, 1], points[:, 0]] = 1
 
-        raw_moments = _Moments._compute_raw_moments(shape, image)
+        raw_moments = _Moments._compute_raw_moments(image, points)
         central_moments = _Moments._compute_central_moments(raw_moments)
         hu_moments = _Moments._compute_hu_moments(central_moments)
 
@@ -653,21 +666,21 @@ class _Moments:
         }
 
     @staticmethod
-    def _compute_raw_moments(shape, image):
+    def _compute_raw_moments(image, points):
         # Computes the raw moments of the given shape
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
 
         return {
-            'm00': _Moments._compute_raw_moment(shape, image, 0, 0),
-            'm01': _Moments._compute_raw_moment(shape, image, 0, 1),
-            'm10': _Moments._compute_raw_moment(shape, image, 1, 0),
-            'm11': _Moments._compute_raw_moment(shape, image, 1, 1),
-            'm12': _Moments._compute_raw_moment(shape, image, 1, 2),
-            'm02': _Moments._compute_raw_moment(shape, image, 0, 2),
-            'm20': _Moments._compute_raw_moment(shape, image, 2, 0),
-            'm21': _Moments._compute_raw_moment(shape, image, 2, 1),
-            'm03': _Moments._compute_raw_moment(shape, image, 0, 3),
-            'm30': _Moments._compute_raw_moment(shape, image, 3, 0)
+            'm00': _Moments._compute_raw_moment(image, points, 0, 0),
+            'm01': _Moments._compute_raw_moment(image, points, 0, 1),
+            'm10': _Moments._compute_raw_moment(image, points, 1, 0),
+            'm11': _Moments._compute_raw_moment(image, points, 1, 1),
+            'm12': _Moments._compute_raw_moment(image, points, 1, 2),
+            'm02': _Moments._compute_raw_moment(image, points, 0, 2),
+            'm20': _Moments._compute_raw_moment(image, points, 2, 0),
+            'm21': _Moments._compute_raw_moment(image, points, 2, 1),
+            'm03': _Moments._compute_raw_moment(image, points, 0, 3),
+            'm30': _Moments._compute_raw_moment(image, points, 3, 0)
         }
 
     @staticmethod
@@ -717,9 +730,9 @@ class _Moments:
         ]
 
     @staticmethod
-    def _compute_raw_moment(shape, image, p, q):
+    def _compute_raw_moment(image, points, p, q):
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
-        x, y = shape.contour[:, 0], shape.contour[:, 1]
+        x, y = points[:, 0], points[:, 1]
 
         return np.sum((x ** p) * (y ** q) * image[y, x])
 
