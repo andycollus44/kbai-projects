@@ -115,6 +115,13 @@ class RavensShape:
                 int(self.moments['raw']['m01'] / self.moments['raw']['m00']))
 
     @property
+    def angle(self):
+        # Compute the "indicative" angle as proposed by Wobbrock et. al in their $1 Recognizer Algorithm
+        # Reference: http://faculty.washington.edu/wobbrock/pubs/uist-07.01.pdf
+        # The angle between the centroid of the shape and its first point of the contour
+        return math.degrees(math.atan2(self.centroid[1] - self.contour[0][1], self.centroid[0] - self.contour[0][0]))
+
+    @property
     def arclength(self):
         return self._arc_length
 
@@ -155,8 +162,8 @@ class RavensShape:
         self._filled = value
 
     def __repr__(self):
-        return 'RavensShape(label={}, shape={}, filled={}, positions={})'.format(self.label, self.shape, self.filled,
-                                                                                 self.positions)
+        return 'RavensShape(label={}, shape={}, filled={}, angle={}, positions={})'.format(
+            self.label, self.shape, self.filled, self.angle, self.positions)
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
@@ -712,9 +719,9 @@ class _Moments:
     @staticmethod
     def _compute_raw_moment(shape, image, p, q):
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Raw_moments
-        x, y = shape.contour[:, 1], shape.contour[:, 0]
+        x, y = shape.contour[:, 0], shape.contour[:, 1]
 
-        return np.sum((x ** p) * (y ** q) * image[x, y])
+        return np.sum((x ** p) * (y ** q) * image[y, x])
 
     @staticmethod
     def _compute_invariant(central_moments, i, j):
