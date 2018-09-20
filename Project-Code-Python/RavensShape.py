@@ -4,6 +4,7 @@ This module contains classes to understand, operate and manipulate shapes inside
 import math
 import uuid
 from collections import defaultdict, deque
+from operator import attrgetter
 
 import numpy as np
 from PIL import ImageFilter
@@ -65,6 +66,7 @@ class RavensShape:
         self._sides = 0
         self._positions = {}
         self._filled = False
+        self._size_rank = 0
 
     @property
     def label(self):
@@ -158,9 +160,17 @@ class RavensShape:
     def filled(self, value):
         self._filled = value
 
+    @property
+    def size_rank(self):
+        return self._size_rank
+
+    @size_rank.setter
+    def size_rank(self, value):
+        self._size_rank = value
+
     def __repr__(self):
-        return 'RavensShape(label={}, shape={}, filled={}, angle={}, positions={})'.format(
-            self.label, self.shape, self.filled, self.angle, self.positions)
+        return 'RavensShape(label={}, shape={}, filled={}, angle={}, size_rank={}, positions={})'.format(
+            self.label, self.shape, self.filled, self.angle, self.size_rank, self.positions)
 
     def _bounding_box(self):
         # Computes the bounding box for a set of points
@@ -289,10 +299,13 @@ class RavensShapeExtractor:
 
     def _compute_attributes(self, shapes, image):
         positions = _PositionFinder.apply(shapes)
+        ranks = _RelativeSizeRanker.apply(shapes)
 
         for shape in shapes:
             # Find the relative positions of each shape with respect to the others
             shape.positions = positions[shape.label]
+            # Find the relative rank for the size of each shape
+            shape.size_rank = ranks[shape.label]
             # Classify the unique shapes to find geometric relationships
             shape.shape, shape.sides = _ShapeClassifier.classify(shape.contour, shape.arclength)
 
@@ -816,6 +829,54 @@ class _Moments:
     def _compute_invariant(central_moments, i, j):
         # Reference: https://en.wikipedia.org/wiki/Image_moment#Scale_invariants
         return central_moments['mu{}{}'.format(i, j)] / math.pow(central_moments['mu00'], (1 + (i + j) / 2))
+
+
+class _RelativeSizeRanker:
+    """
+    Implements a ranker to assign relative ranks to shapes based on their perimeters.
+    """
+
+    # This threshold was chose arbitrarily after empirical experimentation
+    _PERIMETER_THRESHOLD = 50
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def apply(shapes):
+        """
+        Ranks each shape based on its size, relative to the other shapes where lower ranks mean smaller shapes.
+
+        :param shapes: The shapes to rank.
+        :type shapes: list[RavensShape]
+        :return: A dictionary of sizes keyed by each shape's label.
+        :rtype: dict
+        """
+        # Sort all shapes in increasing order of their perimeter
+        sorted_shapes = sorted(shapes, key=attrgetter('arclength'))
+
+        # Assign ranks to reach shape relative to each other
+        rank = 0
+        # This stack will hold the latest shape
+        assigned = [sorted_shapes[0]]
+        sizes = {assigned[0].label: rank}
+
+        for shape in sorted_shapes[1:]:
+            latest = assigned[-1]
+            diff = abs(shape.arclength - latest.arclength)
+
+            if diff < _RelativeSizeRanker._PERIMETER_THRESHOLD:
+                # The current shape is similar in size to the latest one, so assign the same rank
+                sizes[shape.label] = latest.size_rank
+                continue
+
+            # The current shape is significantly different in size, i.e. larger, so increment the rank
+            # assign that rank to the label, and now that shape becomes the latest one for next iteration
+            rank = rank + 1
+            sizes[shape.label] = rank
+            assigned.append(shape)
+
+        return sizes
 
 
 class _ContourTracer:
