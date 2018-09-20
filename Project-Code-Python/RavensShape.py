@@ -359,8 +359,10 @@ class _ShapeClassifier:
     # These thresholds were chose arbitrarily after empirical experimentation
     # Percentage of the original perimeter to keep
     _PERCENTAGE_OF_ORIGINAL_PERIMETER = 0.015
-    # Number of points to resample for the contour
-    _RESAMPLING = 128
+    # Number of maximum points to resample for the contour
+    _RESAMPLING_MAX = 160
+    # Percentage of the original perimeter to resample
+    _RESAMPLING_PERCENTAGE = 0.5
     # Distance between points to merge them together
     _MERGE_DISTANCE = 10
 
@@ -389,7 +391,11 @@ class _ShapeClassifier:
         :rtype: tuple
         """
         # Pre-process the contour by resampling the number of points to reduce noise
-        resampled_contour = _ShapeClassifier._resample(contour, perimeter, _ShapeClassifier._RESAMPLING)
+        resampled_contour = _ShapeClassifier._resample(
+            contour,
+            perimeter,
+            max(_ShapeClassifier._RESAMPLING_MAX, int(_ShapeClassifier._RESAMPLING_PERCENTAGE * perimeter))
+        )
         # Now approximate the contour with the new resampled points, the new perimeter also needs to be computed
         approx_contour = _ShapeClassifier._approximate_contour(resampled_contour,
                                                                _ShapeClassifier._perimeter(resampled_contour))
