@@ -199,7 +199,6 @@ class RavensShape:
 class RavensShapeExtractor:
     # These thresholds were chosen arbitrarily after empirical experimentation
     _MINIMUM_NUMBER_OF_POINTS = 10
-    _PERIMETER_THRESHOLD = 50
     _CENTROID_DISTANCE_THRESHOLD = 50
 
     def __init__(self):
@@ -282,10 +281,10 @@ class RavensShapeExtractor:
             for current in unique:
                 current_cx, current_cy = current.centroid
 
-                perimeter_diff = abs(shape.arclength - current.arclength)
+                perimeters_are_similar = _perimeters_are_similar(shape.arclength, current.arclength)
                 centroid_distance = math.sqrt((shape_cx - current_cx) ** 2 + (shape_cy - current_cy) ** 2)
 
-                if perimeter_diff < self._PERIMETER_THRESHOLD and centroid_distance < self._CENTROID_DISTANCE_THRESHOLD:
+                if perimeters_are_similar and centroid_distance < self._CENTROID_DISTANCE_THRESHOLD:
                     # This is probably a duplicated shape
                     is_duplicate = True
                     break
@@ -317,15 +316,14 @@ class RavensShapeExtractor:
 
 class RavensShapeMatcher:
     """
-    Implements a shape matcher based on Hu moments.
-
-    Reference: https://tinyurl.com/y84hmhdq (see CV_CONTOURS_MATCH_I1)
+    Implements a shape matcher based on different attributes.
     """
+    MATCH_ALL = 0
 
     def __init__(self):
         pass
 
-    def apply(self, shape, other_shape):
+    def apply(self, shape, other_shape, match=MATCH_ALL):
         """
         Matches the given two shapes returning a similarity measure.
 
@@ -333,26 +331,38 @@ class RavensShapeMatcher:
         :type shape: RavensShape
         :param other_shape: The other shape to match.
         :type other_shape: RavensShape
+        :param match: The type of match to perform. Valid values are: MATCH_ALL.
+        :type match: int
         :return: A similarity measure where 1.0 is a perfect match and 0.0 is no match at all.
         :rtype: float
         """
-        hu_a = np.array(shape.hu_moments)
-        hu_b = np.array(other_shape.hu_moments)
+        if match == self.MATCH_ALL:
+            # Compare the shape, the filled-ness and the perimeter
+            attributes = [
+                shape.shape == other_shape.shape,
+                shape.filled == other_shape.filled,
+                _perimeters_are_similar(shape.arclength, other_shape.arclength)
+            ]
+        else:
+            raise ValueError('Invalid match: {}'.format(match))
 
-        m_a = np.sign(hu_a) * np.log10(np.fabs(hu_a))
-        m_b = np.sign(hu_b) * np.log10(np.fabs(hu_b))
+        return self._similarity(attributes)
 
-        return max(0.0, 1.0 - np.sum(np.fabs((1. / m_a) - (1. / m_b))))
+    def _similarity(self, expected):
+        return sum(expected) / float(len(expected))
 
 
 class _ShapeClassifier:
     """
     Implements a shape classifier based on contour approximation.
     """
-    # Percentage of the original perimeter to keep chosen arbitrarily after empirical experimentation
+    # These thresholds were chose arbitrarily after empirical experimentation
+    # Percentage of the original perimeter to keep
     _PERCENTAGE_OF_ORIGINAL_PERIMETER = 0.015
-    # Number of points to resample for the contour chose arbitrarily after empirical experimentation
+    # Number of points to resample for the contour
     _RESAMPLING = 128
+    # Distance between points to merge them together
+    _MERGE_DISTANCE = 10
 
     # Shapes with fixed number of vertices
     _SHAPES = {
@@ -474,7 +484,7 @@ class _ShapeClassifier:
             current = merged[-1]
             distance = math.sqrt((point[0] - current[0]) ** 2 + (point[1] - current[1]) ** 2)
 
-            if distance <= 5:
+            if distance <= _ShapeClassifier._MERGE_DISTANCE:
                 # Merge these points together by obtaining the middle point
                 middle_point = int((point[0] + current[0]) / 2), int((point[1] + current[1]) / 2)
                 # Remove the current point and replace it with the middle point
@@ -1179,3 +1189,18 @@ class _Point:
     def _apply_delta(self, absolute_direction, relative_direction):
         dx, dy = self._DELTAS[absolute_direction][relative_direction]
         return _Point(self._x + dx, self._y + dy)
+
+
+def _perimeters_are_similar(p1, p2):
+    """
+    Determines whether two perimeters are similar to each other or not.
+
+    :param p1: The first perimeter.
+    :type p1: np.ndarray
+    :param p2: The second perimeter.
+    :type p2: np.ndarray
+    :return: True if the perimeters are similar to each other, False otherwise.
+    :rtype: bool
+    """
+    # The difference threshold was chosen arbitrarily after some empirical experimentation
+    return abs(p1 - p2) < 50
