@@ -9,6 +9,7 @@
 # These methods will be necessary for the project's main method to run.
 
 from RavensProblemSolver import RavensProblemSolverFactory
+from RavensSemanticSolver import RavensSemanticSolverFactory
 from RavensVisualProblem import RavensVisualProblemFactory
 
 
@@ -19,7 +20,8 @@ class Agent:
     # Do not add any variables to this signature; they will not be used by
     # main().
     def __init__(self):
-        self._solver_factory = RavensProblemSolverFactory()
+        self._visual_solver_factory = RavensProblemSolverFactory()
+        self._semantic_solver_factory = RavensSemanticSolverFactory()
         self._problem_factory = RavensVisualProblemFactory()
 
     # The primary method for solving incoming Raven's Progressive Matrices.
@@ -32,10 +34,12 @@ class Agent:
     # Make sure to return your answer *as an integer* at the end of Solve().
     # Returning your answer as a string may cause your program to crash.
     def Solve(self, problem):
-        solver = self._solver_factory.create(problem.problemType)
+        visual_solver = self._visual_solver_factory.create(problem.problemType)
+        semantic_solver = self._semantic_solver_factory.create(problem.problemType)
         visual_problem = self._problem_factory.create(problem.problemType, problem.figures)
 
-        answer = solver.run(visual_problem)
+        # Attempt to solve the problem visually first, if no answer is found then try the semantic approach, else skip
+        answer = visual_solver.run(visual_problem) or semantic_solver.run(visual_problem) or -1
 
         print 'The answer to problem "{}" is {}'.format(problem.name, answer)
 

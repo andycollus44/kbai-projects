@@ -60,4 +60,4 @@ if [[ ! ${continue} =~ ^[Y/y]$ ]]; then echo; echo 'Bye!'; exit 1; fi
 
 cmd=$(_generate_assignment_command ${action} ${project})
 
-python submit.py --provider gt --assignment ${cmd} --files RavensProblemSolver.py RavensVisualProblem.py RavensTransformation.py RavensShape.py
+python submit.py --provider gt --assignment ${cmd} --files RavensProblemSolver.py RavensVisualProblem.py RavensTransformation.py RavensShape.py RavensSemanticSolver.py RavensSemanticRelationship.py

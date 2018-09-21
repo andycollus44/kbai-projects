@@ -54,8 +54,7 @@ class RavensProblemSolver:
         # The best answer is the first sorted element
         _, best = answers[0]
 
-        # If no answer was found by any of the transformations, then skip the problem (-1), else return the best answer
-        return -1 if best is None else best
+        return best
 
     def _are_similar(self, image, other_image):
         return self._similarity(image, other_image) >= self._SIMILARITY_THRESHOLD
