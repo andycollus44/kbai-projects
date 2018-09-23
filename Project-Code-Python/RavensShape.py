@@ -1,9 +1,10 @@
 """
 This module contains classes to understand, operate and manipulate shapes inside Raven's figures.
 """
+import json
 import math
 import uuid
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
 from operator import attrgetter
 
 import numpy as np
@@ -203,6 +204,7 @@ class RavensShapeExtractor:
 
     def __init__(self):
         self._contour_tracer = _ContourTracer()
+        self._shape_classifier = RavensShapeTemplateClassifier()
 
     def apply(self, image):
         """
@@ -306,7 +308,7 @@ class RavensShapeExtractor:
             # Find the relative rank for the size of each shape
             shape.size_rank = ranks[shape.label]
             # Classify the unique shapes to find geometric relationships
-            shape.shape, shape.sides = _ShapeClassifier.classify(shape.contour, shape.arclength)
+            shape.shape, shape.sides, _ = self._shape_classifier.classify(shape)
 
         # Analyze "filled-ness" for the shapes which has to be done after all positions are computed
         # and the area points are obtained, see `_FilledAnalyzer.apply()` for an explanation of this
@@ -400,9 +402,222 @@ class RavensRelativeSizeRanker:
         return sizes
 
 
+class RavensShapeTemplateClassifier:
+    """
+    Implements a classifier that uses templates to assign shapes to contours.
+
+    This is an implementation of the $1 Recognizer Algorithm as proposed by Wobbrock et. al.
+    Reference: http://faculty.washington.edu/wobbrock/pubs/uist-07.01.pdf
+    """
+    _TEMPLATES_FILE = 'shapes.txt'
+    _SIDES = {
+        'TRIANGLE': 3,
+        'SQUARE': 4,
+        'PENTAGON': 5,
+        'HEXAGON': 6,
+        'HEPTAGON': 7,
+        'OCTAGON': 8
+    }
+    _RESAMPLING = 64
+    _SCALE = 250.0
+
+    Template = namedtuple('Template', ['name', 'points'])
+
+    def __init__(self):
+        # Load all existing templates, if any
+        try:
+            with open(self._TEMPLATES_FILE) as f:
+                templates = json.load(f)
+                self._templates = [self.Template(name=t['name'], points=t['points']) for t in templates]
+        except IOError:
+            # The file with templates does not exist
+            self._templates = []
+
+    @property
+    def templates(self):
+        return self._templates
+
+    def save_templates(self, templates):
+        """
+        Saves the given templates to the file.
+
+        :param templates: The templates to save.
+        :type templates: list[Template]
+        """
+        for template in templates:
+            points = self._preprocess([(p[0], p[1]) for p in template.points])
+            self._templates.append(self.Template(name=template.name, points=points))
+
+        # Save them to our "database" of known templates of shapes
+        with open(self._TEMPLATES_FILE, 'w') as out:
+            json.dump([dict(t._asdict()) for t in self._templates], out)
+
+    def classify(self, shape):
+        """
+        Classifies the given shape's contour into an actual shape, e.g. a circle.
+
+        :param shape: The input shape whose contour will be classified.
+        :type shape: RavensShape
+        :return: The name of the shape, its number of sides (0 for non-geometric figureS) and its similarity score.
+        #:rtype: tuple
+        """
+        contour = self._preprocess([(p[0], p[1]) for p in shape.contour])
+
+        min_distance = float('inf')
+        chosen_template = None
+
+        for template in self._templates:
+            # For each template perform a "Golden Ratio" search to find the distance from the shape's contour to it
+            distance = self._distance_at_best_angle(contour, template.points, -math.radians(45.0), math.radians(45.0),
+                                                    math.radians(2.0))
+
+            if distance < min_distance:
+                # The closer the distance is, the better the shape is matching against the template
+                min_distance = distance
+                chosen_template = template.name
+
+        score = 1. - min_distance / (0.5 * math.sqrt(self._SCALE ** 2 + self._SCALE ** 2))
+
+        # Return the name of the template, its number of sides if it a geometric figure and its similarity score
+        return chosen_template, self._SIDES.get(chosen_template, 0), score
+
+    def _preprocess(self, points):
+        # Applies all pre-processing steps to the given set of points
+        points = self._resample(points, self._RESAMPLING)
+        points = self._rotate_to_zero(points)
+        points = self._scale_to(points, self._SCALE)
+        points = self._translate_to_origin(points)
+
+        return points
+
+    def _resample(self, points, n):
+        # Resamples the given set of points to have `n` roughly equally separated points
+        interval_length = self._path_length(points) / (n - 1)
+        distance = 0.
+        resampled = [(points[0][0], points[0][1])]
+
+        i = 1
+
+        while i < len(points):
+            prev = points[i - 1]
+            point = points[i]
+
+            dist = self._distance(prev, point)
+
+            if (distance + dist) >= interval_length:
+                qx = prev[0] + ((interval_length - distance) / dist) * (point[0] - prev[0])
+                qy = prev[1] + ((interval_length - distance) / dist) * (point[1] - prev[1])
+
+                resampled.append((qx, qy))
+                # qx,qy will act as the new previous point in the next iteration
+                points.insert(i, (qx, qy))
+                distance = 0.
+            else:
+                distance = distance + dist
+
+            i = i + 1
+
+        # Sometimes we fall a rounding-error short of adding the last point, so add it if so
+        if len(resampled) == n - 1:
+            resampled.append((points[-1][0], points[-1][1]))
+
+        return resampled
+
+    def _rotate_to_zero(self, points):
+        # Rotates the given set of points around their centroid to make the shape's indicative angle zero
+        centroid = self._centroid(points)
+        relative_angle = math.atan2(centroid[1] - points[0][1], centroid[0] - points[0][0])
+
+        return self._rotate_by(points, -relative_angle)
+
+    def _rotate_by(self, points, radians):
+        # Rotates the given set of points around their centroid `radians` amount
+        centroid = self._centroid(points)
+        cos = math.cos(radians)
+        sin = math.sin(radians)
+
+        return [
+            ((p[0] - centroid[0]) * cos - (p[1] - centroid[1]) * sin + centroid[0],
+             (p[0] - centroid[0]) * sin + (p[1] - centroid[1]) * cos + centroid[1])
+            for p in points
+        ]
+
+    def _scale_to(self, points, size):
+        # Scales the given set of points so that their bounding box is of size `size ^ 2`
+        minx, miny, maxx, maxy = self._bounding_box(points)
+        width = maxx - minx
+        height = maxy - miny
+
+        return [(p[0] * (size / float(width)), p[1] * (size / float(height))) for p in points]
+
+    def _translate_to_origin(self, points):
+        # Translates the given set of points back to the origin
+        centroid = self._centroid(points)
+        return [(p[0] - centroid[0], p[1] - centroid[1]) for p in points]
+
+    def _distance_at_best_angle(self, points, template_points, radians_a, radians_b, radians_delta):
+        # Performs a "Golden Ratio" search over a set of angles to find the minimum distance between
+        # the given points and the template, i.e. find the template that best matches the given shape
+        phi = 0.5 * (-1. + math.sqrt(5.))
+
+        x1 = phi * radians_a + (1. - phi) * radians_b
+        f1 = self._distance_at_angle(points, template_points, x1)
+
+        x2 = (1. - phi) * radians_a + phi * radians_b
+        f2 = self._distance_at_angle(points, template_points, x2)
+
+        while abs(radians_b - radians_a) > radians_delta:
+            if f1 < f2:
+                radians_b = x2
+                x2 = x1
+                f2 = f1
+                x1 = phi * radians_a + (1. - phi) * radians_b
+                f1 = self._distance_at_angle(points, template_points, x1)
+            else:
+                radians_a = x1
+                x1 = x2
+                f1 = f2
+                x2 = (1. - phi) * radians_a + phi * radians_b
+                f2 = self._distance_at_angle(points, template_points, x2)
+
+        return min(f1, f2)
+
+    def _distance_at_angle(self, points, other_points, radians):
+        # Rotates the given set of points by `radians` amount,
+        # and then computes the distance between said points and others
+        rotated = self._rotate_by(points, radians)
+        return self._path_distance(rotated, other_points)
+
+    def _bounding_box(self, points):
+        points = np.array(points)
+        minx, miny = np.min(points, axis=0)
+        maxx, maxy = np.max(points, axis=0)
+
+        return minx, miny, maxx, maxy
+
+    def _centroid(self, points):
+        return tuple(np.mean(np.array(points), axis=0))
+
+    def _path_length(self, points):
+        return sum([self._distance(points[i - 1], points[i]) for i in range(1, len(points))])
+
+    def _path_distance(self, points_a, points_b):
+        assert len(points_a) == len(points_b), 'Points do not have the same length {} != {}'.format(len(points_a),
+                                                                                                    len(points_b))
+        distance = sum([self._distance(points_a[i], points_b[i]) for i in range(0, len(points_a))])
+
+        return distance / len(points_a)
+
+    def _distance(self, p1, p2):
+        return math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+
+
 class _ShapeClassifier:
     """
     Implements a shape classifier based on contour approximation.
+
+    This class has been replaced by the template-based classifier
+    but is being kept here for historical purposes.
     """
     # These thresholds were chose arbitrarily after empirical experimentation
     # Percentage of the original perimeter to keep
