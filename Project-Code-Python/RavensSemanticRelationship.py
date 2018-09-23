@@ -34,13 +34,17 @@ class SemanticRelationship:
         pass
 
     @abstractmethod
-    def test(self, expected, answers):
+    def test(self, expected, ravens_matrix, answers, axis):
         """
         Tests the generated expected result against the available answers to the problem.
 
         :param expected: The expected result generated from a call to `generate()`.
+        :param ravens_matrix: The matrix of images that constitutes the Raven's problem.
+        :type ravens_matrix: list[list[PIL.Image.Image]]
         :param answers: The set of available answers.
         :type answers: list[PIL.Image.Image]
+        param axis: The axis from which the relationship was generated.
+        :type axis: int
         :return: The correct answer or None, if no answer matches the expected results.
         :rtype: int
         """
@@ -82,7 +86,7 @@ class AddKeepDelete2x2(SemanticRelationship):
 
         return reconstructed
 
-    def test(self, expected, answers):
+    def test(self, expected, ravens_matrix, answers, axis):
         # Re-apply the extractor to the expected result, this is important to handle cases where the
         # expected result ends up being a single filled shape, which though it was originally composed
         # by many shapes, visually, it is now a single one, so the answer will only have one too!
@@ -216,3 +220,42 @@ class AddKeepDelete2x2(SemanticRelationship):
         match = np.argmax(similarities)
 
         return other_shapes[match] if similarities[match] > 0.9 else None
+
+
+class SidesArithmetic(SemanticRelationship):
+    """
+    Generates a semantic relationship of arithmetic between frames based on shapes' sides for 2x2 matrices.
+    This semantic relationship is only going to be valid for problems where there are geometric figures.
+    """
+    @property
+    def name(self):
+        return 'Sides Arithmetic'
+
+    def generate(self, ravens_matrix, axis):
+        # Get the shapes for 'A' and 'B' (row-wise) or 'C' (column-wise)
+        shapes_a = _extractor.apply(ravens_matrix[0][0])
+        other_shapes = _extractor.apply(ravens_matrix[0][1]) if axis == 0 else _extractor.apply(ravens_matrix[1][0])
+
+        # For each list of shapes, count the number of sides of each shape
+        sides_a = sum([s.sides for s in shapes_a])
+        other_sides = sum([s.sides for s in other_shapes])
+
+        # The expected result is the difference between sides
+        return sides_a - other_sides
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # Get the shapes for 'C' (row-wise) or 'B' (column-wise), and the count of their sides
+        shapes = _extractor.apply(ravens_matrix[1][0]) if axis == 0 else _extractor.apply(ravens_matrix[0][1])
+        sides = sum([s.sides for s in shapes])
+
+        # For each answer, extract the shapes and the count of their sides
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+            answer_sides = sum([s.sides for s in answer_shapes])
+
+            # If the difference between the answer and the image's sides equals the expected,
+            # then we have found an answer
+            if sides - answer_sides == expected:
+                return index + 1
+
+        return None

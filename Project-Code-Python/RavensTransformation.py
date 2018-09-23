@@ -120,6 +120,24 @@ class ShapeFillTransformation(SingleTransformation):
         return reconstructed
 
 
+class RotationTransformation(SingleTransformation):
+    """
+    A rotation trasformation rotates the image by certain degrees clockwise.
+    """
+
+    def __init__(self, degrees):
+        self._degrees = degrees
+
+    @property
+    def name(self):
+        return 'Rotation'
+
+    def apply(self, image, **kwargs):
+        # Image.rotate() rotates the image counterclockwise,
+        # use the negative to rotate the image clockwise
+        return image.rotate(-self._degrees, resample=Image.BICUBIC)
+
+
 class XORTransformation(MultiTransformation):
     """
     A XOR transformation finds the difference between two images to detect deletion of shapes between frames.
