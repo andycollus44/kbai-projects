@@ -13,33 +13,48 @@ class RavensMutualFractalFactory:
     def __init__(self):
         self._encoder = RavensFractalEncoder()
 
-    def create(self, a, b, size):
+    def create(self, images, size):
         """
-        Creates a MutualFactory object given two images and the size of the representation.
+        Creates a MutualFactory object given some images and the size of the representation.
 
-        :param a: The first image.
-        :type a: ndarray
-        :param b: The second image.
-        :type b: ndarray
+        :param images: A list of images represented as arrays of pixels.
+        :type images: list[ndarray]
         :param size: The size of the representation.
         :type size: int
         :return: A MutualFractal object.
         :rtype: MutualFractal
         """
-        fractals_ab = self._encoder.apply(a, b, size)
-        fractals_ba = self._encoder.apply(b, a, size)
+        if len(images) == 2:
+            fractals_ab = self._encoder.apply(images[0], images[1], size)
+            fractals_ba = self._encoder.apply(images[1], images[0], size)
 
-        return RavensMutualFractal(fractals_ab, fractals_ba)
+            fractals = [fractals_ab, fractals_ba]
+        elif len(images) == 3:
+            fractals_ij = self._encoder.apply(images[0], images[1], size)
+            fractals_jk = self._encoder.apply(images[1], images[2], size)
+            fractals_ik = self._encoder.apply(images[0], images[2], size)
+
+            fractals = [fractals_ij, fractals_jk, fractals_ik]
+        else:
+            raise ValueError('Cannot create MutualFractal for {} images!'.format(len(images)))
+
+        return RavensMutualFractal(fractals)
 
 
 class RavensMutualFractal:
     """
     Represents a mutual fractal as defined by McGreggor and Goel in "Fractal Analogies for General Intelligence".
 
+    It only support representations of pairs and triplets.
     Reference: http://dilab.gatech.edu/publications/McGreggor%20Goel%202012%20AGI.pdf
     """
-    def __init__(self, fractals_ab, fractals_ba):
-        self._features = fractals_ab.union(fractals_ba)
+    def __init__(self, fractals):
+        assert 2 <= len(fractals) <= 3, 'Only pairs and triplets are supported!'
+
+        if len(fractals) == 2:
+            self._features = fractals[0].union(fractals[1])
+        elif len(fractals) == 3:
+            self._features = fractals[0].union(fractals[1]).union(fractals[2])
 
     @property
     def features(self):
