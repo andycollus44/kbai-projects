@@ -16,7 +16,7 @@ class RavensMutualFractalFactory:
 
     def create(self, images, size):
         """
-        Creates a MutualFactory object given some images and the size of the representation.
+        Creates a MutualFractal object given some images and the size of the representation.
 
         :param images: A list of images represented as arrays of pixels.
         :type images: list[ndarray]
@@ -26,21 +26,18 @@ class RavensMutualFractalFactory:
         :rtype: MutualFractal
         """
         if len(images) == 2:
-            fractals_ab = self._encoder.apply(images[0], images[1], size)
-            fractals_ba = self._encoder.apply(images[1], images[0], size)
-
-            fractals = [fractals_ab, fractals_ba]
+            return self._mutual_fractal(images[0], images[1], size)
         elif len(images) == 3:
-            # TODO: Fix implementation (see notes in phone)!
-            fractals_ij = self._encoder.apply(images[0], images[1], size)
-            fractals_jk = self._encoder.apply(images[1], images[2], size)
-            fractals_ik = self._encoder.apply(images[0], images[2], size)
+            mutual_ij = self._mutual_fractal(images[0], images[1], size)
+            mutual_jk = self._mutual_fractal(images[1], images[2], size)
+            mutual_ik = self._mutual_fractal(images[0], images[2], size)
 
-            fractals = [fractals_ij, fractals_jk, fractals_ik]
+            return RavensMutualFractal([mutual_ij.features, mutual_jk.features, mutual_ik.features])
         else:
             raise ValueError('Cannot create MutualFractal for {} images!'.format(len(images)))
 
-        return RavensMutualFractal(fractals)
+    def _mutual_fractal(self, a, b, size):
+        return RavensMutualFractal([self._encoder.apply(a, b, size), self._encoder.apply(b, a, size)])
 
 
 class RavensMutualFractal:
