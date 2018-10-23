@@ -37,7 +37,10 @@ class RavensMutualFractalFactory:
             raise ValueError('Cannot create MutualFractal for {} images!'.format(len(images)))
 
     def _mutual_fractal(self, a, b, size):
-        return RavensMutualFractal([self._encoder.apply(a, b, size), self._encoder.apply(b, a, size)])
+        _, features_ab = self._encoder.apply(a, b, size)
+        _, features_ba = self._encoder.apply(b, a, size)
+
+        return RavensMutualFractal([features_ab, features_ba])
 
 
 class RavensMutualFractal:
