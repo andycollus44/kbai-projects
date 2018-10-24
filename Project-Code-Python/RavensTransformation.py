@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod, abstractproperty
 
+import numpy as np
 from PIL import ImageChops, ImageFilter, ImageOps, Image, ImageDraw
 
 from RavensShape import RavensShapeExtractor
@@ -122,7 +123,7 @@ class ShapeFillTransformation(SingleTransformation):
 
 class RotationTransformation(SingleTransformation):
     """
-    A rotation trasformation rotates the image by certain degrees clockwise.
+    A rotation transformation rotates the image by certain degrees clockwise.
     """
 
     def __init__(self, degrees):
@@ -162,3 +163,25 @@ class XORTransformation(MultiTransformation):
         # the strongest differences are kept, e.g. a full white or black shape
         # The radius of the Gaussian was found arbitrarily via empirical experimentation
         return ImageChops.logical_xor(image, other).convert('L').filter(ImageFilter.GaussianBlur(radius=10))
+
+
+class UnionTransformation(MultiTransformation):
+    @property
+    def name(self):
+        return 'Union'
+
+    def apply(self, image, **kwargs):
+        super(UnionTransformation, self)._validate(**kwargs)
+
+        # Convert each image into a Numpy array to perform the operation on the pixel values directly
+        image_1 = np.array(image)
+        other = np.array(kwargs['other'])
+
+        # The union operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        unified = np.minimum(image_1, other)
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(unified)

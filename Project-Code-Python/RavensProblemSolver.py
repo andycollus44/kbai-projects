@@ -6,7 +6,8 @@ import numpy as np
 from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, FlipTransformation, MirrorTransformation, NoOpTransformation,
-                                  RotationTransformation, ShapeFillTransformation, XORTransformation)
+                                  RotationTransformation, ShapeFillTransformation, UnionTransformation,
+                                  XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
 
@@ -75,6 +76,10 @@ class RavensProblemSolver:
 
         # `max_val - min_val == 0` happens when the two images are either all black or all white
         return 1 - rmse if max_val - min_val == 0 else 1 - (rmse / (max_val - min_val))
+
+    def _filter_by_similarity(self, similarities):
+        # Filters a list of similarity to keep only the most confident ones
+        return filter(lambda similarity: similarity >= self._SIMILARITY_THRESHOLD, similarities)
 
     def _resize(self, image):
         # Reduce size of the image to 32 x 32 so that operations are faster, and similarities are easier to find
@@ -155,14 +160,14 @@ class _Ravens2x2Solver(RavensProblemSolver):
         # Either the 'B' image for row-wise or the 'C' image for column-wise
         image_2 = matrix[0][1] if axis == 0 else matrix[1][0]
         # Apply the multi-transformation to these two images to obtain the expected result
-        expected = transformation.apply(image_1, **{'other': image_2})
+        expected = transformation.apply(image_1, other=image_2)
 
         # The 'C' image for row-wise or the 'B' image for column-wise
         last_image = matrix[1][0] if axis == 0 else matrix[0][1]
         # For each answer, apply the multi-transformation with the last image to generate potential candidates
         # and test its similarity with the expected result, i.e. generate and test
         similarities = [
-            super(_Ravens2x2Solver, self)._similarity(expected, transformation.apply(last_image, **{'other': answer}))
+            super(_Ravens2x2Solver, self)._similarity(expected, transformation.apply(last_image, other=answer))
             for answer in answers
         ]
 
@@ -170,8 +175,7 @@ class _Ravens2x2Solver(RavensProblemSolver):
         # two pairs to validate they are similar since the two images are needed to obtain a transformation and this
         # result is compared to the application of the same transformation against the last image with the answers
         # So, to avoid answering problems incorrectly, filter out the answers that are not significantly similar
-        filtered = filter(lambda similarity: similarity >= super(_Ravens2x2Solver, self)._SIMILARITY_THRESHOLD,
-                          similarities)
+        filtered = super(_Ravens2x2Solver, self)._filter_by_similarity(similarities)
 
         # If there are no significantly similar candidates, then there is no answer
         if len(filtered) == 0:
@@ -186,11 +190,130 @@ class _Ravens2x2Solver(RavensProblemSolver):
 class _Ravens3x3Solver(RavensProblemSolver):
     @property
     def _transforms(self):
-        return []
+        return [
+            NoOpTransformation(),
+            MirrorTransformation(),
+            UnionTransformation()
+        ]
 
     @property
     def _axes(self):
         return [0, 1, 2]
 
     def _apply(self, problem, transformation, axis):
-        return Answer(similarity=0.0, answer=None)
+        if transformation.type is SINGLE:
+            similarity, answer = self._apply_single(problem, transformation, axis)
+        elif transformation.type is MULTI:
+            similarity, answer = self._apply_multi(problem, transformation, axis)
+        else:
+            raise ValueError('Invalid transformation of type: {}'.format(transformation.type))
+
+        # Answers are one-indexed based
+        return Answer(similarity=similarity, answer=answer + 1 if answer is not None else None)
+
+    def _apply_single(self, problem, transformation, axis):
+        matrix = problem.matrix
+        answers = problem.answers
+
+        if not self._is_single_transformation_valid(matrix, transformation, axis):
+            # If the transformation is not applicable, then there is no answer
+            return 0., None
+
+        # Apply the given transformation to the first image
+        image_1 = transformation.apply(self._select_first_image(matrix, axis))
+
+        # Find the answer that most closely matches the transformed image, i.e. generate and test
+        similarities = [super(_Ravens3x3Solver, self)._similarity(image_1, answer) for answer in answers]
+        candidate = np.argmax(similarities)
+
+        return similarities[candidate], candidate
+
+    def _apply_multi(self, problem, transformation, axis):
+        matrix = problem.matrix
+        answers = problem.answers
+
+        if not self._is_multi_transformation_valid(matrix, transformation, axis):
+            # If the transformation is not applicable, then there is no answer
+            return 0., None
+
+        image_1 = self._select_first_image(matrix, axis)
+        image_2 = self._select_second_image(matrix, axis)
+        # Apply the multi-transformation to these two images to obtain the expected result
+        expected = transformation.apply(image_1, other=image_2)
+
+        # For each answer, test its similarity with the expected result, i.e. generate and test
+        similarities = [super(_Ravens3x3Solver, self)._similarity(expected, answer) for answer in answers]
+
+        # Find the best candidate based on similarity
+        candidate = np.argmax(similarities)
+
+        return similarities[candidate], candidate
+
+    def _is_single_transformation_valid(self, matrix, transformation, axis):
+        # Validate the given transformation applies to this problem by making sure each pair
+        # in the rows, columns or the diagonal are consistent
+        images = self._select_images(matrix, axis, True)
+
+        for image_1, image_2 in images:
+            # If a pair doesn't match then the transformation is most likely not applicable
+            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1), image_2):
+                return False
+
+        return True
+
+    def _is_multi_transformation_valid(self, matrix, transformation, axis):
+        # Validate the given transformation applies to this problem by making sure each triplet
+        # in the rows, columns or the diagonal are consistent
+
+        # For diagonal relationships, since we only have two images, a multi-transformation is not valid
+        if axis == 2:
+            return False
+
+        images = self._select_images(matrix, axis, False)
+
+        for image_1, image_2, image_3 in images:
+            # If a triplet doesn't match then the transformation is most likely not applicable
+            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, other=image_2), image_3):
+                return False
+
+        return True
+
+    def _select_images(self, matrix, axis, is_single):
+        # Selects the pair of images that form the other rows, columns or diagonal
+        if axis == 0:
+            # Row-wise
+            if is_single:
+                # 'A'->'C' and 'D'->'F'
+                return [(matrix[0][0], matrix[0][2]), (matrix[1][0], matrix[1][2])]
+            else:
+                # 'A','B'->'C' and 'D','E'->'F'
+                return [(matrix[0][0], matrix[0][1], matrix[0][2]), (matrix[1][0], matrix[1][1], matrix[1][2])]
+        elif axis == 1:
+            # Column-wise
+            if is_single:
+                # 'A'->'G' and 'B'->'H'
+                return [(matrix[0][0], matrix[2][0]), (matrix[0][1], matrix[2][1])]
+            else:
+                # 'A','D'->'G' and 'B','E'->'H'
+                return [(matrix[0][0], matrix[1][0], matrix[2][0]), (matrix[0][1], matrix[1][1], matrix[2][1])]
+        else:
+            # Diagonal-wise, we only have the 'A'->'E'
+            return [(matrix[0][0], matrix[1][1])]
+
+    def _select_first_image(self, matrix, axis):
+        # The 'G' image for row-wise, the 'C' image for column-wise or the 'A' image for diagonal-wise
+        if axis == 0:
+            return matrix[2][0]
+        elif axis == 1:
+            return matrix[0][2]
+        else:
+            return matrix[0][0]
+
+    def _select_second_image(self, matrix, axis):
+        # The 'H' image for row-wise, the 'F' image for column-wise or the 'E' image for diagonal-wise
+        if axis == 0:
+            return matrix[2][1]
+        elif axis == 1:
+            return matrix[1][2]
+        else:
+            return matrix[1][1]
