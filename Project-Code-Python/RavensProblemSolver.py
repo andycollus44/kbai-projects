@@ -27,7 +27,7 @@ class RavensProblemSolverFactory:
         if problem_type == '2x2':
             return _Ravens2x2Solver()
         elif problem_type == '3x3':
-            raise ValueError('3x3 problems are not supported!')
+            return _Ravens3x3Solver()
         else:
             raise ValueError('Invalid problem type: {}'.format(problem_type))
 
@@ -46,13 +46,15 @@ class RavensProblemSolver:
         :return: The index of the selected answer.
         :rtype: int
         """
-        # Apply each transformation for each axis (row=0, column=1)
-        answers = [self._apply(problem, transformation, axis) for axis in [0, 1] for transformation in self._transforms]
+        # Apply each transformation for each valid axis defined by the underlying solver
+        answers = [self._apply(problem, transformation, axis)
+                   for axis in self._axes
+                   for transformation in self._transforms]
         # Sort them in increasing order by their similarity measure
         answers.sort(key=itemgetter(0), reverse=True)
 
         # The best answer is the first sorted element
-        _, best = answers[0]
+        _, best = answers[0] if answers else (0.0, None)
 
         return best
 
@@ -83,6 +85,11 @@ class RavensProblemSolver:
         # The list of all available transformations for this solver
         pass
 
+    @abstractproperty
+    def _axes(self):
+        # The list of valid axes for this solver
+        pass
+
     @abstractmethod
     def _apply(self, problem, transformation, axis):
         # Applies a particular transformation to the Raven's matrix of images for the given axis
@@ -102,6 +109,10 @@ class _Ravens2x2Solver(RavensProblemSolver):
             XORTransformation(),
             RotationTransformation(90)
         ]
+
+    @property
+    def _axes(self):
+        return [0, 1]
 
     def _apply(self, problem, transformation, axis):
         if transformation.type is SINGLE:
@@ -170,3 +181,16 @@ class _Ravens2x2Solver(RavensProblemSolver):
         candidate = np.argmax(similarities)
 
         return similarities[candidate], candidate
+
+
+class _Ravens3x3Solver(RavensProblemSolver):
+    @property
+    def _transforms(self):
+        return []
+
+    @property
+    def _axes(self):
+        return [0, 1, 2]
+
+    def _apply(self, problem, transformation, axis):
+        return Answer(similarity=0.0, answer=None)

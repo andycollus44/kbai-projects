@@ -19,7 +19,7 @@ class RavensSemanticSolverFactory:
         if problem_type == '2x2':
             return _RavensSemantic2x2Solver()
         elif problem_type == '3x3':
-            raise ValueError('3x3 problems are not supported!')
+            return _RavensSemantic3x3Solver()
         else:
             raise ValueError('Invalid problem type: {}'.format(problem_type))
 
@@ -40,7 +40,7 @@ class RavensSemanticSolver:
         for relationship in self._relationships:
             answers = []
 
-            for axis in [0, 1]:
+            for axis in self._axes:
                 expected = relationship.generate(problem.matrix, axis)
                 answer = relationship.test(expected, problem.matrix, problem.answers, axis)
                 answers.append(answer)
@@ -57,6 +57,11 @@ class RavensSemanticSolver:
         # The list of all available semantic relationships for this solver
         pass
 
+    @abstractproperty
+    def _axes(self):
+        # The list of valid axes for this solver
+        pass
+
 
 class _RavensSemantic2x2Solver(RavensSemanticSolver):
     @property
@@ -65,3 +70,17 @@ class _RavensSemantic2x2Solver(RavensSemanticSolver):
             AddKeepDelete2x2(),
             SidesArithmetic()
         ]
+
+    @property
+    def _axes(self):
+        return [0, 1]
+
+
+class _RavensSemantic3x3Solver(RavensSemanticSolver):
+    @property
+    def _relationships(self):
+        return []
+
+    @property
+    def _axes(self):
+        return [0, 1, 2]
