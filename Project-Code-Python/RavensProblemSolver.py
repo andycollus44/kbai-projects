@@ -5,7 +5,8 @@ from operator import itemgetter
 import numpy as np
 from PIL import Image
 
-from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, MirrorTransformation,
+from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication,
+                                  ImageSwitchSidesHorizontallyTransformation, MirrorTransformation,
                                   NoOpTransformation, RotationTransformation, ShapeFillTransformation,
                                   XORTransformation)
 
@@ -229,7 +230,8 @@ class _Ravens3x3Solver(RavensProblemSolver):
                 ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
                 ImageDuplication.All_FRAMES_NON_OVERLAPPING,
                 ImageDuplication.VERTICAL
-            )
+            ),
+            ImageSwitchSidesHorizontallyTransformation()
         ]
 
     @property

@@ -230,7 +230,7 @@ class ImageDuplication(SingleTransformation):
         # Override the confidence threshold because the images will not match perfectly based on
         # the duplication operators; however, they should be fairly similar, but not as strict
         # as the default 90% confidence threshold
-        return 0.84
+        return 0.8
 
     def apply(self, image, **kwargs):
         if kwargs.get('A', None) is None:
@@ -329,6 +329,40 @@ class ImageDuplication(SingleTransformation):
             unified = np.minimum(unified, duplicates[i])
 
         return unified
+
+
+class ImageSwitchSidesHorizontallyTransformation(SingleTransformation):
+    """
+    An image switch transformation switches two sides of an image horizontally.
+    """
+    @property
+    def name(self):
+        return 'ImageSwitchSidesHorizontally'
+
+    @property
+    def confidence(self):
+        # Override the confidence threshold because the images will not match perfectly based on
+        # the movement operators; however, they should be fairly similar, but not as strict
+        # as the default 90% confidence threshold
+        return 0.8
+
+    def apply(self, image, **kwargs):
+        # For this transformation, we assume only two shapes are present and each one is exactly
+        # at each half of the image, horizontally
+
+        im = np.array(image.copy())
+        half = image.width / 2
+
+        # Partition the image into a left and right side
+        # In an image, the 'y' column is the row so we slice using the y-axis
+        left = im[:, 0:half]
+        right = im[:, half:]
+
+        # Switch sides
+        switched = np.hstack((right, left))
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(switched)
 
 
 class XORTransformation(MultiTransformation):
