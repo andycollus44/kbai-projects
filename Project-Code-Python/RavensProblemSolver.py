@@ -195,29 +195,53 @@ class _Ravens3x3Solver(RavensProblemSolver):
         return [
             NoOpTransformation(),
             MirrorTransformation(),
-            # Example: Basic Problem C-03
+            # Example: Basic Problem C-03 (row)
             ImageDuplication(
                 ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
                 ImageDuplication.All_FRAMES_NON_OVERLAPPING,
                 ImageDuplication.DIAGONAL
             ),
-            # Example: Basic Problem C-04
+            # Example: Basic Problem C-03 (column)
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.All_FRAMES_NON_OVERLAPPING,
+                ImageDuplication.INVERTED_DIAGONAL
+            ),
+            # Example: Basic Problem C-04 (row)
             ImageDuplication(
                 ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
                 ImageDuplication.ALL_FRAMES_OVERLAPPING,
                 ImageDuplication.HORIZONTAL
             ),
-            # Example: Basic Problem C-06
+            # Example: Basic Problem C-04 (column)
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.ALL_FRAMES_OVERLAPPING,
+                ImageDuplication.VERTICAL
+            ),
+            # Example: Basic Problem C-06 (row)
             ImageDuplication(
                 ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
                 ImageDuplication.ALL_FRAMES_SIDE_BY_SIDE,
                 ImageDuplication.HORIZONTAL
             ),
-            # Example: Basic Problem C-10
+            # Example: Basic Problem C-06 (column)
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.ALL_FRAMES_SIDE_BY_SIDE,
+                ImageDuplication.VERTICAL
+            ),
+            # Example: Basic Problem C-10 (row)
             ImageDuplication(
                 ImageDuplication.TWO_TIMES_ALL_FRAMES,
                 ImageDuplication.MIDDLE_FRAME_OVERLAPPING_LAST_FRAME_NON_OVERLAPPING,
                 ImageDuplication.HORIZONTAL
+            ),
+            # Example: Basic Problem C-10 (column)
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_ALL_FRAMES,
+                ImageDuplication.MIDDLE_FRAME_OVERLAPPING_LAST_FRAME_NON_OVERLAPPING,
+                ImageDuplication.VERTICAL
             ),
             # Example: Challenge Problem C-03
             ImageDuplication(

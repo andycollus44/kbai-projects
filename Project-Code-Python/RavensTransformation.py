@@ -167,6 +167,7 @@ class ImageDuplication(SingleTransformation):
     HORIZONTAL = 0
     VERTICAL = 1
     DIAGONAL = 2
+    INVERTED_DIAGONAL = 3
 
     # Duplication modes
     OVERLAPPING = 0
@@ -257,6 +258,9 @@ class ImageDuplication(SingleTransformation):
             if self._axis == self.HORIZONTAL:
                 # Use a third the width of the shape as the duplication offset in order for there to be some overlap
                 result = self._duplicate(image.copy(), frame, int(width / 3.0), self._move_horizontally)
+            elif self._axis == self.VERTICAL:
+                # Use a third the height of the shape as the duplication offset in order for there to be some overlap
+                result = self._duplicate(image.copy(), frame, int(height / 3.0), self._move_vertically)
         elif self._mode_per_frame[frame] == self.NON_OVERLAPPING:
             if self._axis == self.HORIZONTAL:
                 # Use the whole width plus a little bit more (a third of the width) of the shape as the offset
@@ -270,12 +274,19 @@ class ImageDuplication(SingleTransformation):
                 # Use the whole width of the shape plus half the height as the offset
                 # to avoid overlap both vertically and horizontally
                 result = self._duplicate(image.copy(), frame, int(width + height / 2.0), self._move_diagonally)
+            elif self._axis == self.INVERTED_DIAGONAL:
+                # Use the whole width of the shape plus half the height as the offset
+                # to avoid overlap both vertically and horizontally
+                result = self._duplicate(image.copy(), frame, int(width + height / 2.0), self._move_diagonally_inverted)
         elif self._mode_per_frame[frame] == self.SIDE_BY_SIDE:
             if self._axis == self.HORIZONTAL:
                 # Use the whole width  of the shape as the offset to places images side by side
                 result = self._duplicate(image.copy(), frame, width, self._move_horizontally)
+            elif self._axis == self.VERTICAL:
+                # Use the whole height  of the shape as the offset to places images side by side
+                result = self._duplicate(image.copy(), frame, width, self._move_vertically)
         else:
-            raise ValueError('Invalid mode {}!')
+            raise ValueError('Invalid mode {}!'.format(self._mode_per_frame[frame]))
 
         # Reconstruct the image back to its Pillow representation
         return Image.fromarray(result)
@@ -317,6 +328,11 @@ class ImageDuplication(SingleTransformation):
     def _move_diagonally(self, image, offset):
         # Move the whole image diagonally by "rolling" the matrix vertically and horizontally
         return self._move_horizontally(self._move_vertically(image, offset), offset)
+
+    def _move_diagonally_inverted(self, image, offset):
+        # Move the whole image diagonally by "rolling" the matrix vertically and horizontally
+        # one movement to one side and another movement to the opposite side effectively being inverted
+        return self._move_horizontally(self._move_vertically(image, offset), -offset)
 
     def _union(self, image, duplicates):
         # The union operation as defined by Kunda in his doctoral dissertation
