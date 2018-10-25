@@ -94,6 +94,16 @@ class RavensShape:
         return self._bbox
 
     @property
+    def width(self):
+        minx, _, maxx, _ = self._bbox
+        return maxx - minx
+
+    @property
+    def height(self):
+        _, miny, _, maxy = self._bbox
+        return maxy - miny
+
+    @property
     def moments(self):
         return self._moments
 

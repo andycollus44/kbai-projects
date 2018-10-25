@@ -5,8 +5,8 @@ from operator import itemgetter
 import numpy as np
 from PIL import Image
 
-from RavensTransformation import (SINGLE, MULTI, FlipTransformation, MirrorTransformation, NoOpTransformation,
-                                  RotationTransformation, ShapeFillTransformation, UnionTransformation,
+from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, MirrorTransformation,
+                                  NoOpTransformation, RotationTransformation, ShapeFillTransformation,
                                   XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
@@ -59,8 +59,9 @@ class RavensProblemSolver:
 
         return best
 
-    def _are_similar(self, image, other_image):
-        return self._similarity(image, other_image) >= self._SIMILARITY_THRESHOLD
+    def _are_similar(self, image, other_image, confidence=None):
+        confidence = confidence or self._SIMILARITY_THRESHOLD
+        return self._similarity(image, other_image) >= confidence
 
     def _similarity(self, image, other_image):
         # Computes the similarity between this image and another one using the Normalized Root Mean Squared Error
@@ -193,7 +194,42 @@ class _Ravens3x3Solver(RavensProblemSolver):
         return [
             NoOpTransformation(),
             MirrorTransformation(),
-            UnionTransformation()
+            # Example: Basic Problem C-03
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.All_FRAMES_NON_OVERLAPPING,
+                ImageDuplication.DIAGONAL
+            ),
+            # Example: Basic Problem C-04
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.ALL_FRAMES_OVERLAPPING,
+                ImageDuplication.HORIZONTAL
+            ),
+            # Example: Basic Problem C-06
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.ALL_FRAMES_SIDE_BY_SIDE,
+                ImageDuplication.HORIZONTAL
+            ),
+            # Example: Basic Problem C-10
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_ALL_FRAMES,
+                ImageDuplication.MIDDLE_FRAME_OVERLAPPING_LAST_FRAME_NON_OVERLAPPING,
+                ImageDuplication.HORIZONTAL
+            ),
+            # Example: Challenge Problem C-03
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.All_FRAMES_NON_OVERLAPPING,
+                ImageDuplication.HORIZONTAL
+            ),
+            # Example: Challenge Problem C-06
+            ImageDuplication(
+                ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
+                ImageDuplication.All_FRAMES_NON_OVERLAPPING,
+                ImageDuplication.VERTICAL
+            )
         ]
 
     @property
@@ -220,7 +256,7 @@ class _Ravens3x3Solver(RavensProblemSolver):
             return 0., None
 
         # Apply the given transformation to the first image
-        image_1 = transformation.apply(self._select_first_image(matrix, axis))
+        image_1 = transformation.apply(self._select_first_image(matrix, axis), A=matrix[0][0])
 
         # Find the answer that most closely matches the transformed image, i.e. generate and test
         similarities = [super(_Ravens3x3Solver, self)._similarity(image_1, answer) for answer in answers]
@@ -256,7 +292,8 @@ class _Ravens3x3Solver(RavensProblemSolver):
 
         for image_1, image_2 in images:
             # If a pair doesn't match then the transformation is most likely not applicable
-            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1), image_2):
+            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, A=matrix[0][0]), image_2,
+                                                              confidence=transformation.confidence):
                 return False
 
         return True
@@ -273,7 +310,8 @@ class _Ravens3x3Solver(RavensProblemSolver):
 
         for image_1, image_2, image_3 in images:
             # If a triplet doesn't match then the transformation is most likely not applicable
-            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, other=image_2), image_3):
+            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, other=image_2), image_3,
+                                                              confidence=transformation.confidence):
                 return False
 
         return True

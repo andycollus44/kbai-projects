@@ -9,6 +9,9 @@ from RavensShape import RavensShapeExtractor
 SINGLE = 'SINGLE'
 MULTI = 'MULTI'
 
+# Keep singleton instances available to all semantic relationships
+_extractor = RavensShapeExtractor()
+
 
 class Transformation:
     __metaclass__ = ABCMeta
@@ -19,6 +22,15 @@ class Transformation:
 
     @abstractproperty
     def type(self):
+        pass
+
+    @abstractproperty
+    def confidence(self):
+        """
+        Allows underlying transformations to override the default confidence threshold.
+
+        :return: The confidence threshold to use for this particular transformation.
+        """
         pass
 
     @abstractmethod
@@ -46,6 +58,10 @@ class SingleTransformation(Transformation):
     def type(self):
         return SINGLE
 
+    @property
+    def confidence(self):
+        return None
+
 
 class MultiTransformation(Transformation):
     __metaclass__ = ABCMeta
@@ -53,6 +69,10 @@ class MultiTransformation(Transformation):
     @property
     def type(self):
         return MULTI
+
+    @property
+    def confidence(self):
+        return None
 
     def _validate(self, **kwargs):
         if not kwargs.get('other', None):
@@ -137,6 +157,178 @@ class RotationTransformation(SingleTransformation):
         # Image.rotate() rotates the image counterclockwise,
         # use the negative to rotate the image clockwise
         return image.rotate(-self._degrees, resample=Image.BICUBIC)
+
+
+class ImageDuplication(SingleTransformation):
+    """
+    An image duplication transformation clones the given image the specified number of times along a particular axis.
+    """
+    # Axes for duplication
+    HORIZONTAL = 0
+    VERTICAL = 1
+    DIAGONAL = 2
+
+    # Duplication modes
+    OVERLAPPING = 0
+    NON_OVERLAPPING = 1
+    SIDE_BY_SIDE = 2
+
+    # The frame being produced with respect to the matrix
+    MIDDLE_FRAME = 0
+    LAST_FRAME = 1
+
+    # Helpful aliases for the parameters of this transformation
+    TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME = {
+        MIDDLE_FRAME: 2,
+        LAST_FRAME: 3
+    }
+
+    TWO_TIMES_ALL_FRAMES = {
+        MIDDLE_FRAME: 2,
+        LAST_FRAME: 2
+    }
+
+    ALL_FRAMES_OVERLAPPING = {
+        MIDDLE_FRAME: OVERLAPPING,
+        LAST_FRAME: OVERLAPPING
+    }
+
+    All_FRAMES_NON_OVERLAPPING = {
+        MIDDLE_FRAME: NON_OVERLAPPING,
+        LAST_FRAME: NON_OVERLAPPING
+    }
+
+    ALL_FRAMES_SIDE_BY_SIDE = {
+        MIDDLE_FRAME: SIDE_BY_SIDE,
+        LAST_FRAME: SIDE_BY_SIDE
+    }
+
+    MIDDLE_FRAME_OVERLAPPING_LAST_FRAME_NON_OVERLAPPING = {
+        MIDDLE_FRAME: OVERLAPPING,
+        LAST_FRAME: NON_OVERLAPPING
+    }
+
+    def __init__(self, times_per_frame, mode_per_frame, axis):
+        """
+        :param times_per_frame: The number of times to duplicate the image per frame.
+        :type times_per_frame: dict
+        :param mode_per_frame: The mode to use for duplication per frame.
+                               One of `OVERLAPPING` or `NON_OVERLAPPING` or `SIDE_BY_SIDE`.
+        :type mode_per_frame: dict
+        :param axis: The axis to use for duplication. One of `HORIZONTAL`, `VERTICAL` or `DIAGONAL`.
+        """
+        self._times_per_frame = times_per_frame
+        self._mode_per_frame = mode_per_frame
+        self._axis = axis
+
+    @property
+    def name(self):
+        return 'ImageDuplication'
+
+    @property
+    def confidence(self):
+        # Override the confidence threshold because the images will not match perfectly based on
+        # the duplication operators; however, they should be fairly similar, but not as strict
+        # as the default 90% confidence threshold
+        return 0.84
+
+    def apply(self, image, **kwargs):
+        if kwargs.get('A', None) is None:
+            raise ValueError('Transformation {} requires parameters `A`'.format(self.name))
+
+        # Default to the last frame if no frame is passed
+        # This is to support applying this transformation to the middle frames, if needed
+        frame = kwargs.get('frame', self.LAST_FRAME)
+
+        # Extract the shape from image 'A'
+        shapes = _extractor.apply(kwargs['A'])
+
+        # For this transformation, we assume image 'A' always has a single shape
+        # if that is not the case, then we cannot apply this transformation so
+        # we return a black image which most likely will not match with anything
+        if len(shapes) != 1:
+            return Image.new(image.mode, image.size)
+
+        width, height = shapes[0].width, shapes[0].height
+
+        result = None
+
+        if self._mode_per_frame[frame] == self.OVERLAPPING:
+            if self._axis == self.HORIZONTAL:
+                # Use a third the width of the shape as the duplication offset in order for there to be some overlap
+                result = self._duplicate(image.copy(), frame, int(width / 3.0), self._move_horizontally)
+        elif self._mode_per_frame[frame] == self.NON_OVERLAPPING:
+            if self._axis == self.HORIZONTAL:
+                # Use the whole width plus a little bit more (a third of the width) of the shape as the offset
+                # to avoid overlap horizontally
+                result = self._duplicate(image.copy(), frame, width + int(width / 3.0), self._move_horizontally)
+            elif self._axis == self.VERTICAL:
+                # Use the whole height plus a little bit more (a third of the height) of the shape as the offset
+                # to avoid overlap vertically
+                result = self._duplicate(image.copy(), frame, height + int(height / 3.0), self._move_vertically)
+            elif self._axis == self.DIAGONAL:
+                # Use the whole width of the shape plus half the height as the offset
+                # to avoid overlap both vertically and horizontally
+                result = self._duplicate(image.copy(), frame, int(width + height / 2.0), self._move_diagonally)
+        elif self._mode_per_frame[frame] == self.SIDE_BY_SIDE:
+            if self._axis == self.HORIZONTAL:
+                # Use the whole width  of the shape as the offset to places images side by side
+                result = self._duplicate(image.copy(), frame, width, self._move_horizontally)
+        else:
+            raise ValueError('Invalid mode {}!')
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(result)
+
+    def _duplicate(self, image, frame, offset, duplication_operator):
+        times = self._times_per_frame[frame]
+
+        # Generate `1 - times` duplicates alternating between left and right
+        # We generate `1 -times` because the original image is one of said duplicates!
+        duplicates = []
+        direction = 1
+        offset_increment = 1
+
+        for t in range(0, times - 1):
+            duplicates.append(duplication_operator(image, offset * offset_increment * direction))
+            direction *= -1
+
+            # Every two duplicates we need to double our increment to move the duplicate further
+            if t > 0 and t % 2 == 0:
+                offset_increment *= 2
+
+        # Merge all those duplicates
+        unified = self._union(image, duplicates)
+
+        # Center the image if the number of duplicates is even by moving it back by half the offset
+        if times % 2 == 0:
+            unified = duplication_operator(unified, -offset / 2)
+
+        return unified
+
+    def _move_horizontally(self, image, offset):
+        # Move the whole image horizontally by "rolling" the matrix
+        return np.roll(image, offset, 1)
+
+    def _move_vertically(self, image, offset):
+        # Move the whole image vertically by "rolling" the matrix
+        return np.roll(image, offset, 0)
+
+    def _move_diagonally(self, image, offset):
+        # Move the whole image diagonally by "rolling" the matrix vertically and horizontally
+        return self._move_horizontally(self._move_vertically(image, offset), offset)
+
+    def _union(self, image, duplicates):
+        # The union operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        unified = np.minimum(image, duplicates[0])
+
+        for i in range(1, len(duplicates)):
+            unified = np.minimum(unified, duplicates[i])
+
+        return unified
 
 
 class XORTransformation(MultiTransformation):
