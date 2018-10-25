@@ -5,7 +5,7 @@ from operator import itemgetter
 import numpy as np
 from PIL import Image
 
-from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication,
+from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, ImageSegmentTopDownDeletion,
                                   ImageSwitchSidesHorizontallyTransformation, MirrorTransformation,
                                   NoOpTransformation, RotationTransformation, ShapeFillTransformation,
                                   XORTransformation)
@@ -231,7 +231,9 @@ class _Ravens3x3Solver(RavensProblemSolver):
                 ImageDuplication.All_FRAMES_NON_OVERLAPPING,
                 ImageDuplication.VERTICAL
             ),
-            ImageSwitchSidesHorizontallyTransformation()
+            ImageSwitchSidesHorizontallyTransformation(),
+            # Partition the image into 3 segments and delete 2 of them top to bottom
+            ImageSegmentTopDownDeletion(3, 2)
         ]
 
     @property

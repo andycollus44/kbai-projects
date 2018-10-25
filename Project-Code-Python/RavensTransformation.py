@@ -365,6 +365,37 @@ class ImageSwitchSidesHorizontallyTransformation(SingleTransformation):
         return Image.fromarray(switched)
 
 
+class ImageSegmentTopDownDeletion(SingleTransformation):
+    """
+    An image segment top-down deletion transformation removes the specified number of segments from a partitioned image.
+    """
+    def __init__(self, segments, to_delete):
+        self._segments = segments
+        self._to_delete = to_delete
+
+    @property
+    def name(self):
+        return 'ImageSegmentTopDownDeletion'
+
+    def apply(self, image, **kwargs):
+        im = np.array(image.copy())
+
+        # Segment the image according to the given number of segments
+        partition = image.height / self._segments
+        segmented = [
+            im[partition * i:partition * (i + 1)]
+            for i in range(self._segments)
+        ]
+
+        # Delete the segment by converting it into a blank image following a top-down approach, i.e. in the list order
+        # Since Numpy creates a view of the array when slicing, the original complete `im` array has been modified
+        for i in range(self._to_delete):
+            segmented[i][:] = 255
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(im)
+
+
 class XORTransformation(MultiTransformation):
     """
     A XOR transformation finds the difference between two images to detect deletion of shapes between frames.
