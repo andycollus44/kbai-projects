@@ -195,6 +195,7 @@ class _Ravens3x3Solver(RavensProblemSolver):
         return [
             NoOpTransformation(),
             MirrorTransformation(),
+            FlipTransformation(),
             # Example: Basic Problem C-03 (row)
             ImageDuplication(
                 ImageDuplication.TWO_TIMES_MIDDLE_FRAME_THREE_TIMES_LAST_FRAME,
