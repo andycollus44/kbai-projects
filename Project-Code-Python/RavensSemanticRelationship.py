@@ -54,6 +54,28 @@ class SemanticRelationship:
         return self.name
 
 
+class SemanticRelationship3x3(SemanticRelationship):
+    __metaclass__ = ABCMeta
+
+    def _select_first_image(self, matrix, axis):
+        # The 'G' image for row-wise, the 'C' image for column-wise or the 'A' image for diagonal-wise
+        if axis == 0:
+            return matrix[2][0]
+        elif axis == 1:
+            return matrix[0][2]
+        else:
+            return matrix[0][0]
+
+    def _select_second_image(self, matrix, axis):
+        # The 'H' image for row-wise, the 'F' image for column-wise or the 'E' image for diagonal-wise
+        if axis == 0:
+            return matrix[2][1]
+        elif axis == 1:
+            return matrix[1][2]
+        else:
+            return matrix[1][1]
+
+
 class AddKeepDelete2x2(SemanticRelationship):
     """
     Generates a semantic relationship of shapes added, deleted or kept between frames for 2x2 matrices.
@@ -259,3 +281,103 @@ class SidesArithmetic(SemanticRelationship):
                 return index + 1
 
         return None
+
+
+class ShapeFillPointsSystem3x3(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship of a points system based on the 'filled' attribute of shapes for a 3x3 problem.
+    """
+    # Point system based on filled/non-filled attributes of shapes
+    # Note that the relationship would still hold if we had chosen other values,
+    # as long as, these values are double of each other, e.g. 2 and 4.
+    _POINTS_FILLED = 1
+    _POINTS_EMPTY = 2
+
+    @property
+    def name(self):
+        return 'Shape Fill Points System'
+
+    def generate(self, ravens_matrix, axis):
+        # Extract the shapes for the first and second image
+        shapes_1 = _extractor.apply(self._select_first_image(ravens_matrix, axis))
+        shapes_2 = _extractor.apply(self._select_second_image(ravens_matrix, axis))
+
+        # Now count the points for each image based on the system
+        points_1 = self._count_points(shapes_1)
+        points_2 = self._count_points(shapes_2)
+
+        # The expected result is the difference between points
+        return points_1 - points_2
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # Get the shapes for the second image and count the points based on the same system
+        shapes = _extractor.apply(self._select_second_image(ravens_matrix, axis))
+        points = self._count_points(shapes)
+
+        # For each answer, extract the shapes and count their points
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+            answer_points = self._count_points(answer_shapes)
+
+            # If the difference between the image's and the answer's points equals the expected,
+            # then we have found an answer
+            if points - answer_points == expected:
+                return index + 1
+
+        return None
+
+    def _count_points(self, shapes):
+        if len(shapes) == 0:
+            # Handle blank images by setting the points to 0
+            return 0
+
+        return sum([self._POINTS_FILLED if s.filled else self._POINTS_EMPTY for s in shapes])
+
+
+class ShapeScaling3x3(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that looks at the difference between the scale of shapes from frame to frame.
+    """
+    # The tolerance for the difference with the expected result, in pixels
+    _TOLERANCE = 10
+
+    @property
+    def name(self):
+        return 'Shape Scaling'
+
+    def generate(self, ravens_matrix, axis):
+        # Extract the shapes for the first and second image
+        shapes_1 = _extractor.apply(self._select_first_image(ravens_matrix, axis))
+        shapes_2 = _extractor.apply(self._select_second_image(ravens_matrix, axis))
+
+        # Now compute the total size of all the shapes
+        size_1 = self._compute_total_size(shapes_1)
+        size_2 = self._compute_total_size(shapes_2)
+
+        # The expected result is the difference between the total sizes
+        return size_1 - size_2
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # Get the shapes for the second image and compute their total size
+        shapes = _extractor.apply(self._select_second_image(ravens_matrix, axis))
+        size = self._compute_total_size(shapes)
+
+        # For each answer, extract the shapes and compute their total size
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+            answer_size = self._compute_total_size(answer_shapes)
+
+            # If the difference between the image's and the answer's points equals the expected,
+            # with a certain degree of error, then we have found an answer
+            diff = size - answer_size
+            if abs(diff - expected) <= self._TOLERANCE:
+                return index + 1
+
+        return None
+
+    def _compute_total_size(self, shapes):
+        if len(shapes) == 0:
+            # Handle blank images by setting the size to 0
+            return 0
+
+        return sum([s.arclength for s in shapes])
