@@ -439,6 +439,9 @@ class XORTransformation(MultiTransformation):
 
 
 class UnionTransformation(MultiTransformation):
+    """
+    A union transformation joins two images together producing a single merged image.
+    """
     @property
     def name(self):
         return 'Union'
@@ -458,3 +461,27 @@ class UnionTransformation(MultiTransformation):
 
         # Reconstruct the image back to its Pillow representation
         return Image.fromarray(unified)
+
+
+class RotationAndUnionTransformation(MultiTransformation):
+    """
+    A rotation and union transformation rotates the first image by certain degrees clockwise and merges it with another.
+    """
+
+    def __init__(self, degrees):
+        self._rotation = RotationTransformation(degrees)
+        self._union = UnionTransformation()
+
+    @property
+    def name(self):
+        return 'RotationAndUnion'
+
+    def apply(self, image, **kwargs):
+        super(RotationAndUnionTransformation, self)._validate(**kwargs)
+
+        # Rotate the first image
+        rotated = self._rotation.apply(image)
+        # Merge it with the second image
+        merged = self._union.apply(rotated, **kwargs)
+
+        return merged

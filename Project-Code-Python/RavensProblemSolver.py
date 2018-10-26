@@ -7,8 +7,8 @@ from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, ImageSegmentTopDownDeletion,
                                   ImageSwitchSidesHorizontallyTransformation, MirrorTransformation,
-                                  NoOpTransformation, RotationTransformation, ShapeFillTransformation,
-                                  XORTransformation)
+                                  NoOpTransformation, RotationTransformation, RotationAndUnionTransformation,
+                                  ShapeFillTransformation, XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
 
@@ -258,7 +258,10 @@ class _Ravens3x3Solver(RavensProblemSolver):
             ),
             ImageSwitchSidesHorizontallyTransformation(),
             # Partition the image into 3 segments and delete 2 of them top to bottom
-            ImageSegmentTopDownDeletion(3, 2)
+            # Example: Basic Problem C-11 (column)
+            ImageSegmentTopDownDeletion(3, 2),
+            # Example: Basic Problem C-11 (row)
+            RotationAndUnionTransformation(90)
         ]
 
     @property
