@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod, abstractproperty
+from operator import attrgetter
 
 import numpy as np
 from PIL import ImageChops, ImageFilter, ImageOps, Image, ImageDraw
@@ -410,6 +411,127 @@ class ImageSegmentTopDownDeletion(SingleTransformation):
 
         # Reconstruct the image back to its Pillow representation
         return Image.fromarray(im)
+
+
+class ShapeCombination(SingleTransformation):
+    """
+    A shape combination transformation gets all the shapes inside an image and combines them starting from the largest
+    one to the smallest, all centered in the resulting new image.
+    """
+    VERTICALLY = 0
+    HORIZONTALLY = 1
+    DIAGONALLY = 2
+
+    # Helpful aliases for the parameters of this transformation
+    ALL_POSITIONS_HORIZONTALLY = {
+        0: HORIZONTALLY,
+        1: HORIZONTALLY,
+        2: HORIZONTALLY
+    }
+
+    VERTICALLY_DIAGONALLY_HORIZONTALLY = {
+        0: VERTICALLY,
+        1: DIAGONALLY,
+        2: HORIZONTALLY
+    }
+
+    def __init__(self, axis_per_position):
+        self._axis_per_position = axis_per_position
+
+    @property
+    def name(self):
+        return 'ShapeCombination'
+
+    @property
+    def confidence(self):
+        # Override the confidence threshold because the images will not match perfectly based on
+        # the movement operators; however, they should be fairly similar, but not as strict
+        # as the default 90% confidence threshold
+        return 0.85
+
+    def apply(self, image, **kwargs):
+        if kwargs.get('position', None) is None:
+            raise ValueError('Transformation {} requires parameters `position`'.format(self.name))
+
+        # Extract all the shapes in this image
+        shapes = _extractor.apply(image)
+
+        # If there are no shapes, then this transformation most likely does not apply
+        # we return a black image which most likely will not match with anything
+        if len(shapes) == 0:
+            return Image.new(image.mode, image.size)
+
+        # To make sure smaller shapes, that are inside any filled ones, are not masked,
+        # sort the shapes based on the size rank in decreasing, so that smaller shapes are drawn last
+        shapes = sorted(shapes, key=attrgetter('size_rank'), reverse=True)
+
+        # The centroid of the main image
+        image_centroid = int(image.width / 2), int(image.height / 2)
+
+        # Reconstruct the image by creating a separate **centered** image per shape and then combining all of them
+        images = [self._generate_centered_image(shape, image.mode, image.size, image_centroid, kwargs['position'])
+                  for shape in shapes]
+        merged = self._merge(images)
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(merged)
+
+    def _generate_centered_image(self, shape, mode, size, image_centroid, position):
+        image = Image.new(mode, size, 255)
+
+        draw = ImageDraw.Draw(image)
+        draw.polygon(shape.contour.flatten().tolist(), fill=0 if shape.filled else 255, outline=0)
+        # Draw a line to make the shape's contour wider and help with matching
+        draw.line(shape.contour.flatten().tolist(), fill=0, width=2)
+
+        # Get the distance to the image centroid and the direction the shape should be moved
+        centroid_dists, centroid_directions = self._get_distances_and_directions_to_image_centroid(shape,
+                                                                                                   image_centroid,
+                                                                                                   position)
+        # Move the shape towards the centroid so that it gets centered
+        centered = self._move(image, centroid_dists, centroid_directions, position)
+
+        return centered
+
+    def _merge(self, images):
+        merged = images[0]
+
+        for i in range(1, len(images)):
+            # The union operation as defined by Kunda in his doctoral dissertation
+            # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+            # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+            # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+            merged = np.minimum(merged, images[i])
+
+        return merged
+
+    def _get_distances_and_directions_to_image_centroid(self, shape, image_centroid, position):
+        # Compute the direction towards which the shape should be moved for it to be close to the image centroid
+        if self._axis_per_position[position] == self.HORIZONTALLY:
+            # Move backwards if the x component of the centroid is larger than the x component of the image centroid
+            directions = [-1 if shape.centroid[0] > image_centroid[0] else 1]
+        elif self._axis_per_position[position] == self.VERTICALLY:
+            # Move up if the y component of the centroid is larger than the y component of the image centroid
+            directions = [-1 if shape.centroid[1] > image_centroid[1] else 1]
+        elif self._axis_per_position[position] == self.DIAGONALLY:
+            # Move backwards if the x component of the centroid is larger than the x component of the image centroid
+            # Move up if the y component of the centroid is larger than the y component of the image centroid
+            directions = [-1 if shape.centroid[0] > image_centroid[0] else 1,
+                          -1 if shape.centroid[1] > image_centroid[1] else 1]
+        else:
+            raise ValueError('Invalid axis {}!'.format(self._axis_per_position[position]))
+
+        # The distances are simply the absolute differences between each component (x,y) of the shape centroid and
+        # the image centroid
+        return (abs(shape.centroid[0] - image_centroid[0]), abs(shape.centroid[1] - image_centroid[1])), directions
+
+    def _move(self, image, offsets, directions, position):
+        if self._axis_per_position[position] == self.HORIZONTALLY:
+            return np.roll(np.array(image), offsets[0] * directions[0], 1)
+        elif self._axis_per_position[position] == self.VERTICALLY:
+            return np.roll(np.array(image), offsets[1] * directions[0], 0)
+        elif self._axis_per_position[position] == self.DIAGONALLY:
+            return np.roll(np.roll(np.array(image), offsets[0] * directions[0], 1), offsets[1] * directions[1], 0)
 
 
 class XORTransformation(MultiTransformation):
