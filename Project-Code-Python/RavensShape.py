@@ -622,6 +622,46 @@ class RavensShapeTemplateClassifier:
         return math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
 
 
+class RavensShapeIdentifier:
+    """
+    Identifies shapes inside the given image via its bounding boxes.
+
+    Note: This class does not perform any actual extraction of the shapes or computation of any other attributes.
+          If a more sophisticated extraction is needed then use the `RavensShapeExtractor`.
+    """
+
+    def __init__(self):
+        self._connected_components = _ConnectedComponentsAlgorithm(_ConnectedComponentsAlgorithm.CONNECTIVITY_FOUR)
+
+    def apply(self, image):
+        """
+        Applies the identifier returning a list of bounding boxes for each identified shape.
+
+        :param image: The image where shapes will be identified in.
+        :type image: PIL.Image.Image
+        :return: A list of bounding boxes where is bounding box is a list of 4 coordinates: minx, miny, maxx, maxy.
+        :rtype: list[list]
+        """
+        labels = self._connected_components.run(image)
+
+        bounding_boxes = []
+
+        # For each unique identified connected component, extract its bounding box
+        for label in np.unique(labels):
+            # Ignore unlabeled background
+            if label < 0:
+                continue
+
+            mask = np.argwhere(labels == label)
+
+            minx, miny = np.min(mask, axis=0)
+            maxx, maxy = np.max(mask, axis=0)
+
+            bounding_boxes.append([minx, miny, maxx, maxy])
+
+        return bounding_boxes
+
+
 class _ShapeClassifier:
     """
     Implements a shape classifier based on contour approximation.
@@ -1425,6 +1465,166 @@ class _Point:
     def _apply_delta(self, absolute_direction, relative_direction):
         dx, dy = self._DELTAS[absolute_direction][relative_direction]
         return _Point(self._x + dx, self._y + dy)
+
+
+class _ConnectedComponentsAlgorithm:
+    """
+    Implements the connected components algorithm to label shapes inside an image.
+
+    Reference: https://en.wikipedia.org/wiki/Connected-component_labeling
+    """
+    _WHITE = 1
+    _BLACK = 0
+
+    CONNECTIVITY_FOUR = 0
+    CONNECTIVITY_EIGHT = 1
+
+    _NEIGHBORS = {
+        # Up and left (behind)
+        CONNECTIVITY_FOUR: [(0, -1), (-1, 0)],
+        # Up-right, up, up-left, left
+        CONNECTIVITY_EIGHT: [(1, -1), (0, -1), (-1, -1), (-1, 0)]
+    }
+
+    _UNASSIGNED = -1
+
+    def __init__(self, connectivity):
+        self._connectivity = connectivity
+
+    def run(self, image):
+        """
+        Runs the algorithm on the given image returning an array of the same size with the labels.
+
+        :param image: The image to run the connected components algorithm against.
+        :type image: PIL.Image.Image
+        :return: An array of the same size as `image` with the labels
+        :rtype: ndarray
+        """
+        # Convert each image into a black and white bi-level representation using a custom threshold since Pillow
+        # dithers the image adding noise to it. A threshold of 60 was used because only the darkest contours should
+        # be kept which helps separating shapes that are "joined" by some lighter grayish pixels that to the human eye
+        # are white, but to the image processing library they are still darkish which affects the algorithm.
+        # So, anything that is not darker than 60 intensity value, i.e. very black, is considered white.
+        # 60 was chosen arbitrarily after empirical experimentation
+        # Reference: https://stackoverflow.com/a/50090612
+        binary_image = np.array(image.copy().point(lambda x: 1 if x > 60 else 0))
+        labeled_image = np.full_like(binary_image, self._UNASSIGNED, dtype=np.int)
+
+        label = 0
+        disjoint_set = _DisjointSet()
+
+        # First pass: assign labels
+        for i in range(0, binary_image.shape[0]):
+            for j in range(0, binary_image.shape[1]):
+                # If the current pixel is not background
+                if binary_image[i, j] != self._WHITE:
+                    # Get the connected neighbors
+                    neighbors = self._get_neighbors(i, j, binary_image, labeled_image)
+
+                    # If neighbors is empty
+                    if len(neighbors) == 0:
+                        # Create a new set for the current label, assign it to the pixel and increment it
+                        disjoint_set.make_set(label)
+                        labeled_image[i, j] = label
+                        label += 1
+                    else:
+                        # Find the smallest label of all the neighbors
+                        neighbors_labels = [labeled_image[nx, ny] for nx, ny in neighbors]
+                        labeled_image[i, j] = min(neighbors_labels)
+
+                        # Add equivalence labels
+                        for neighbor_label in neighbors_labels:
+                            disjoint_set.union(labeled_image[i, j], neighbor_label)
+
+        # Second pass: consolidate equivalence labels
+        for i in range(0, binary_image.shape[0]):
+            for j in range(0, binary_image.shape[1]):
+                if binary_image[i, j] != self._WHITE:
+                    labeled_image[i, j] = disjoint_set.find(labeled_image[i, j])
+
+        return labeled_image
+
+    def _get_neighbors(self, px, py, binary_image, labeled_image):
+        neighbors = []
+
+        for nx, ny in self._NEIGHBORS[self._connectivity]:
+            nx, ny = px + nx, py + ny
+
+            # Filter out neighbors outside of the image
+            if nx < 0 or nx >= binary_image.shape[0] or ny < 0 or ny >= binary_image.shape[1]:
+                continue
+
+            # Filter out neighbors that are not connected by the current pixel's value
+            # or whose labels have not been assigned yet
+            if binary_image[nx, ny] != binary_image[px, py] or labeled_image[nx, ny] == self._UNASSIGNED:
+                continue
+
+            neighbors.append((nx, ny))
+
+        return neighbors
+
+
+class _DisjointSet:
+    """
+    Implements a disjoint set data structure.
+
+    Reference: https://en.wikipedia.org/wiki/Disjoint-set_data_structure
+    """
+
+    def __init__(self):
+        self._parents = {}
+        self._ranks = {}
+
+    def make_set(self, x):
+        """
+        Makes a new set for the given element.
+
+        :param x: The element to create a new set for.
+        """
+        self._parents[x] = x
+        self._ranks[x] = 0
+
+    def find(self, x):
+        """
+        Finds the representative, i.e. root, element of the set where `x` belongs.
+        It uses a path compression heuristic.
+
+        :param x: The element to find its representative set for.
+        :return: The representative set.
+        """
+        if self._parents[x] != x:
+            self._parents[x] = self.find(self._parents[x])
+
+        return self._parents[x]
+
+    def union(self, x, y):
+        """
+        Merges the representative sets for the given two elements.
+        It uses a union by rank heuristic.
+
+        :param x: The first element.
+        :param y: The second element.
+        """
+        x_root = self.find(x)
+        y_root = self.find(y)
+
+        # x and y are already in the same set
+        if x_root == y_root:
+            return
+
+        # x and y are not in same set, so we merge them
+        if self._ranks[x_root] < self._ranks[y_root]:
+            # Swap x_root and y_root
+            x_root, y_root = y_root, x_root
+
+        # Merge y_root into x_root
+        self._parents[y_root] = x_root
+
+        if self._ranks[x_root] == self._ranks[y_root]:
+            self._ranks[x_root] += 1
+
+    def __repr__(self):
+        return 'Parents={}'.format(self._parents)
 
 
 def _perimeters_are_similar(p1, p2):

@@ -4,14 +4,15 @@ from operator import attrgetter
 import numpy as np
 from PIL import ImageChops, ImageFilter, ImageOps, Image, ImageDraw
 
-from RavensShape import RavensShapeExtractor
+from RavensShape import RavensShapeExtractor, RavensShapeIdentifier
 
 # Types of transformations with respect to the images they act on
 SINGLE = 'SINGLE'
 MULTI = 'MULTI'
 
-# Keep singleton instances available to all semantic relationships
+# Keep singleton instances available to all transformations
 _extractor = RavensShapeExtractor()
+_identifier = RavensShapeIdentifier()
 
 
 class Transformation:
@@ -243,7 +244,7 @@ class ImageDuplication(SingleTransformation):
         frame = kwargs.get('frame', self.LAST_FRAME)
 
         # Extract the shape from image 'A'
-        shapes = _extractor.apply(kwargs['A'])
+        shapes = _identifier.apply(kwargs['A'])
 
         # For this transformation, we assume image 'A' always has a single shape
         # if that is not the case, then we cannot apply this transformation so
@@ -251,7 +252,9 @@ class ImageDuplication(SingleTransformation):
         if len(shapes) != 1:
             return Image.new(image.mode, image.size)
 
-        width, height = shapes[0].width, shapes[0].height
+        # Compute the approximate width and height of this shape to be used for all movements
+        minx, miny, maxx, maxy = shapes[0]
+        width, height = maxx - minx, maxy - miny
 
         result = None
 
