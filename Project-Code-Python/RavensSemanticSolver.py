@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractproperty
 
-from RavensSemanticRelationship import AddKeepDelete2x2, ShapeFillPointsSystem3x3, ShapeScaling3x3, SidesArithmetic
+from RavensSemanticRelationship import (AddKeepDelete2x2, InvertedDiagonalUnion, ShapeFillPointsSystem3x3,
+                                        ShapeScaling3x3, SidesArithmetic)
 
 
 class RavensSemanticSolverFactory:
@@ -82,7 +83,8 @@ class _RavensSemantic3x3Solver(RavensSemanticSolver):
     def _relationships(self):
         return [
             ShapeScaling3x3(),
-            ShapeFillPointsSystem3x3()
+            ShapeFillPointsSystem3x3(),
+            InvertedDiagonalUnion()
         ]
 
     @property

@@ -381,3 +381,59 @@ class ShapeScaling3x3(SemanticRelationship3x3):
             return 0
 
         return sum([s.arclength for s in shapes])
+
+
+class InvertedDiagonalUnion(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship where the image 'C' is always merged with the image 'G' of a 3x3 matrix.
+    This relationship is particularly tailored to solve Basic Problem C-12 as discussed in a Piazza post.
+    However, my agent actually discovered that Challenge Problem C-04 can also be solved with this relationship!
+    """
+    _SIMILARITY_THRESHOLD = 0.9
+
+    @property
+    def name(self):
+        return 'Inverted Diagonal Union'
+
+    def generate(self, ravens_matrix, axis):
+        # Irrespective of the axis, join image 'C' with image 'G'
+        image_c = np.array(ravens_matrix[0][2])
+        image_g = np.array(ravens_matrix[2][0])
+
+        # The union operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        merged = np.minimum(image_c, image_g)
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(merged)
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # For each answer, find the one that matches the expected image most closely based on a defined threshold
+        for index, answer in enumerate(answers):
+            if _similarity(expected, answer) >= self._SIMILARITY_THRESHOLD:
+                return index + 1
+
+        return None
+
+
+def _similarity(image, other_image):
+    # Computes the similarity between this image and another one using the Normalized Root Mean Squared Error
+    # References:
+    # - https://www.pyimagesearch.com/2014/09/15/python-compare-two-images/
+    # - https://tinyurl.com/ybmwlsur
+    image = np.array(_resize(image)).astype(np.int)
+    other_image = np.array(_resize(other_image)).astype(np.int)
+
+    rmse = np.sqrt(np.mean((image - other_image) ** 2))
+    max_val = max(np.max(image), np.max(other_image))
+    min_val = min(np.min(image), np.min(other_image))
+
+    # `max_val - min_val == 0` happens when the two images are either all black or all white
+    return 1 - rmse if max_val - min_val == 0 else 1 - (rmse / (max_val - min_val))
+
+
+def _resize(image):
+    # Reduce size of the image to 32 x 32 so that operations are faster, and similarities are easier to find
+    return image.resize((32, 32), resample=Image.BICUBIC)
