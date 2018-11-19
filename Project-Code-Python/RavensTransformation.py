@@ -89,6 +89,10 @@ class NoOpTransformation(SingleTransformation):
     def name(self):
         return 'NoOp'
 
+    @property
+    def confidence(self):
+        return 0.85
+
     def apply(self, image, **kwargs):
         return image.copy()
 
@@ -610,3 +614,36 @@ class RotationAndUnionTransformation(MultiTransformation):
         merged = self._union.apply(rotated, **kwargs)
 
         return merged
+
+
+class InvertedXORTransformation(MultiTransformation):
+    """
+    A inverted XOR transformation finds the difference between two images to construct a third image.
+    It inverts the result because the white background must be preserved.
+    """
+
+    @property
+    def name(self):
+        return 'InvertedXOR'
+
+    @property
+    def confidence(self):
+        return 0.80
+
+    def apply(self, image, **kwargs):
+        super(InvertedXORTransformation, self)._validate(**kwargs)
+
+        # The union and intersection operations as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum, and maximum instead of minimum, because Kunda assumed that the images
+        # had a value of 0 for white but, in reality, 0 indicates a black pixel and
+        # 255 (or 1 if the image is binary) is white
+        union = np.minimum(image, kwargs['other'])
+        intersection = np.maximum(image, kwargs['other'])
+
+        # The XOR operation
+        diff = intersection - union
+        # Correct some of the points to be whiter
+        diff = ImageOps.invert(Image.fromarray(diff).point(lambda x: 255 if x > 60 else 0))
+
+        return diff

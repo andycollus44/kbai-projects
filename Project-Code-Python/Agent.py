@@ -12,6 +12,12 @@ from RavensProblemSolver import RavensProblemSolverFactory
 from RavensSemanticSolver import RavensSemanticSolverFactory
 from RavensVisualProblem import RavensVisualProblemFactory
 
+# A set of problems I do not plan to attempt
+_BLACKLISTED_PROBLEMS = {
+    # Unfortunately, Challenge Problem E-12 causes an infinite loop somewhere in the shape extractor
+    'Challenge Problem E-12'
+}
+
 
 class Agent:
     # The default constructor for your Agent. Make sure to execute any
@@ -34,6 +40,11 @@ class Agent:
     # Make sure to return your answer *as an integer* at the end of Solve().
     # Returning your answer as a string may cause your program to crash.
     def Solve(self, problem):
+        # If the problem is blacklisted, skip it!
+        if problem.name in _BLACKLISTED_PROBLEMS:
+            print 'Skipping problem "{}"'.format(problem.name)
+            return -1
+
         visual_solver = self._visual_solver_factory.create(problem.problemType)
         semantic_solver = self._semantic_solver_factory.create(problem.problemType)
         visual_problem = self._problem_factory.create(problem.problemType, problem.figures)

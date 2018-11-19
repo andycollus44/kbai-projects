@@ -1,14 +1,16 @@
 from abc import ABCMeta, abstractmethod, abstractproperty
 from collections import namedtuple
+from itertools import groupby
 from operator import itemgetter
 
 import numpy as np
 from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, ImageSegmentTopDownDeletion,
-                                  ImageSwitchSidesHorizontallyTransformation, MirrorTransformation,
-                                  NoOpTransformation, RotationTransformation, RotationAndUnionTransformation,
-                                  ShapeFillTransformation, XORTransformation)
+                                  ImageSwitchSidesHorizontallyTransformation, InvertedXORTransformation,
+                                  MirrorTransformation, NoOpTransformation, RotationTransformation,
+                                  RotationAndUnionTransformation, ShapeFillTransformation, UnionTransformation,
+                                  XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
 
@@ -52,7 +54,22 @@ class RavensProblemSolver:
         answers = [self._apply(problem, transformation, axis)
                    for axis in self._axes
                    for transformation in self._transforms]
-        # Sort them in increasing order by their similarity measure
+
+        # To give more importance to the answers that were selected by more transformations/axes
+        # we group them by answer and aggregate its similarities with the idea that if an
+        # answer gets selected more times, it means that it is probably the most correct because
+        # either several transformations resulted in the same answer or one transformation using
+        # different axes resulted in the same answer
+        answers.sort(key=itemgetter(1))
+        grouped = groupby(answers, key=itemgetter(1))
+        aggregated = []
+        for answer, similarities in grouped:
+            similarity = sum([s[0] for s in similarities])
+            aggregated.append(Answer(answer=answer, similarity=similarity))
+
+        answers = aggregated[:]
+
+        # Sort them in increasing order by their aggregated similarity measure
         answers.sort(key=itemgetter(0), reverse=True)
 
         # The best answer is the first sorted element
@@ -261,7 +278,15 @@ class _Ravens3x3Solver(RavensProblemSolver):
             # Example: Basic Problem C-11 (column)
             ImageSegmentTopDownDeletion(3, 2),
             # Example: Basic Problem C-11 (row)
-            RotationAndUnionTransformation(90)
+            RotationAndUnionTransformation(90),
+            # Examples:
+            # - Basic Problem D-11 (row or column)
+            # - Basic Problem E-05 (row or column)
+            # - Basic Problem E-07 (row or column)
+            # - Basic Problem E-08 (row or column)
+            # - Challenge Problem E-01 (row or column)
+            InvertedXORTransformation(),
+            UnionTransformation()
         ]
 
     @property
