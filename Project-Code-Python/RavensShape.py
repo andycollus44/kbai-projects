@@ -471,6 +471,10 @@ class RavensShapeTemplateClassifier:
         :return: The name of the shape, its number of sides (0 for non-geometric figureS) and its similarity score.
         #:rtype: tuple
         """
+        # Handle lines gracefully
+        if self._is_line([(p[0], p[1]) for p in shape.contour]):
+            return 'LINE', 0, 1.0
+
         contour = self._preprocess([(p[0], p[1]) for p in shape.contour])
 
         min_distance = float('inf')
@@ -490,6 +494,14 @@ class RavensShapeTemplateClassifier:
 
         # Return the name of the template, its number of sides if it a geometric figure and its similarity score
         return chosen_template, self._SIDES.get(chosen_template, 0), score
+
+    def _is_line(self, points):
+        # If the width or the height is 0, it means it is a line
+        minx, miny, maxx, maxy = self._bounding_box(points)
+        width = maxx - minx
+        height = maxy - miny
+
+        return width == 0 or height == 0
 
     def _preprocess(self, points):
         # Applies all pre-processing steps to the given set of points
