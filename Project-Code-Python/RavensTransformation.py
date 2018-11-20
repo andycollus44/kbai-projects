@@ -91,7 +91,7 @@ class NoOpTransformation(SingleTransformation):
 
     @property
     def confidence(self):
-        return 0.85
+        return 0.86
 
     def apply(self, image, **kwargs):
         return image.copy()

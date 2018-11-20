@@ -312,6 +312,13 @@ class ShapeFillPointsSystem3x3(SemanticRelationship3x3):
         shapes_1 = _extractor.apply(self._select_first_image(ravens_matrix, axis))
         shapes_2 = _extractor.apply(self._select_second_image(ravens_matrix, axis))
 
+        # We constrain this relationship to work only for problems where all shapes are the same
+        # to avoid answering other problems incorrectly since this relationship was very particular
+        # of the problems in the Basic Set C only
+        if not self._all_shapes_are_equal(shapes_1 + shapes_2):
+            # We return a garbage number that will not match with anything
+            return -9999
+
         # Now count the points for each image based on the system
         points_1 = self._count_points(shapes_1)
         points_2 = self._count_points(shapes_2)
@@ -335,6 +342,9 @@ class ShapeFillPointsSystem3x3(SemanticRelationship3x3):
                 return index + 1
 
         return None
+
+    def _all_shapes_are_equal(self, shapes):
+        return len(set([s.shape for s in shapes])) == 1
 
     def _count_points(self, shapes):
         if len(shapes) == 0:
@@ -426,6 +436,148 @@ class InvertedDiagonalUnion(SemanticRelationship3x3):
                 return index + 1
 
         return None
+
+
+class FindMissingFrame(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that finds the missing frame in the row or column.
+    """
+    _SIMILARITY_THRESHOLD = 0.85
+
+    @property
+    def name(self):
+        return 'Find Missing Frame'
+
+    def generate(self, ravens_matrix, axis):
+        # The row or column of the expected frames
+        if axis == 0:
+            expected_frames = [ravens_matrix[0][0], ravens_matrix[0][1], ravens_matrix[0][2]]
+        else:
+            expected_frames = [ravens_matrix[0][0], ravens_matrix[1][0], ravens_matrix[2][0]]
+
+        expected_frames_indices = {0, 1, 2}
+
+        image_1 = self._select_first_image(ravens_matrix, axis)
+        image_2 = self._select_second_image(ravens_matrix, axis)
+
+        found_frames_indices = set()
+
+        # Find the match for the first image which would 'G' for row or 'C' for column
+        found_frames_indices.add(self._find_match(image_1, expected_frames))
+        # Find the match for the second image which would 'H' for row or 'F' for column
+        found_frames_indices.add(self._find_match(image_2, expected_frames))
+
+        # Compute the number of missing indices that were not matched
+        missing_frame_indices = expected_frames_indices - found_frames_indices
+
+        if len(missing_frame_indices) > 1:
+            # If this happens, it means the relationship is most likely not applicable
+            # we return a black image which most likely will not match with anything
+            return Image.new(image_1.mode, image_1.size)
+
+        # The generated solution is the missing frame that must match an answer
+        return expected_frames[list(missing_frame_indices)[0]]
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # For each answer, find the one that matches the expected image most closely based on a defined threshold
+        similarities = [_similarity(expected, answer) for answer in answers]
+        best = np.argmax(similarities)
+
+        return best + 1 if similarities[best] >= self._SIMILARITY_THRESHOLD else None
+
+    def is_valid(self, axis):
+        # Not valid for diagonals
+        return axis != 2
+
+    def _find_match(self, image, expected_frames):
+        # Find the expected frame that matches the given image
+        for index, expected_frame in enumerate(expected_frames):
+            if _similarity(image, expected_frame) >= self._SIMILARITY_THRESHOLD:
+                return index
+
+        return -1
+
+
+class FindAndMergeCommonShapesRowColumn(SemanticRelationship3x3):
+    """
+    Generates a semantic relationships that finds the commons shapes row-wise and column-wise, and merges them together.
+    """
+    _SIMILARITY_THRESHOLD = 0.85
+
+    @property
+    def name(self):
+        return 'Find And Merge Common Shapes Row Column'
+
+    def generate(self, ravens_matrix, axis):
+        # Extract the shapes for frames 'G' and 'H'
+        shapes_g = _extractor.apply(ravens_matrix[2][0])
+        shapes_h = _extractor.apply(ravens_matrix[2][1])
+
+        # Extract the shapes for frames 'C' and 'F'
+        shapes_c = _extractor.apply(ravens_matrix[0][2])
+        shapes_f = _extractor.apply(ravens_matrix[1][2])
+
+        # Find the common shapes between 'G' and 'H', and 'C' and 'F'
+        common_shapes_g_h = self._find_common_shapes(shapes_g, shapes_h)
+        common_shapes_c_f = self._find_common_shapes(shapes_c, shapes_f)
+
+        # The expected answer is a reconstructed image of the merge of the common shapes of the row and column
+        reconstructed = self._reconstruct(common_shapes_g_h + common_shapes_c_f)
+
+        return reconstructed
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        # For each answer, find the one that matches the expected image most closely based on a defined threshold
+        similarities = [_similarity(expected, answer) for answer in answers]
+        best = np.argmax(similarities)
+
+        return best + 1 if similarities[best] >= self._SIMILARITY_THRESHOLD else None
+
+    def is_valid(self, axis):
+        # Only valid for rows, since the same behavior applies for columns and diagonals
+        return axis == 0
+
+    def _find_common_shapes(self, shapes, other_shapes):
+        # Finds the common shapes between the given list of shapes and the list of the other shapes
+        return [
+            shape
+            for shape in shapes
+            if self._has_match(shape, other_shapes)
+        ]
+
+    def _has_match(self, shape, other_shapes):
+        # Determines whether the given shape has a match out of the list of the other shapes using a full matching
+        similarities = [_matcher.apply(shape, other_shape, match=_matcher.MATCH_ALL) for other_shape in other_shapes]
+        match = np.argmax(similarities)
+
+        return similarities[match] >= self._SIMILARITY_THRESHOLD
+
+    def _reconstruct(self, shapes):
+        reconstructed = Image.new('L', (184, 184), 255)
+        draw = ImageDraw.Draw(reconstructed)
+
+        # Handle reconstructing blank images
+        if len(shapes) == 0:
+            return reconstructed
+
+        # Run the ranker to assign new size ranks to the reconstructed image
+        # This is very important because previous ranks are not valid anymore,
+        # e.g. a shape that was the smallest (rank 0), might not be it anymore
+        sizes = RavensRelativeSizeRanker.apply(shapes)
+        for shape in shapes:
+            shape.size_rank = sizes[shape.label]
+
+        # To make sure smaller shapes, that are inside any filled ones, are not masked,
+        # sort the shapes based on the size rank in decreasing, so that smaller shapes are drawn last
+        shapes = sorted(shapes, key=attrgetter('size_rank'), reverse=True)
+
+        # Reconstruct the image by drawing all the shapes
+        for shape in shapes:
+            draw.polygon(shape.contour.flatten().tolist(), fill=0 if shape.filled else 255, outline=0)
+            # Add an extra line over the contour to darken it so that it helps with matching
+            draw.line(shape.contour.flatten().tolist(), fill=0, width=3)
+
+        return reconstructed
 
 
 def _similarity(image, other_image):
