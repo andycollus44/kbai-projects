@@ -42,6 +42,9 @@ class RavensSemanticSolver:
             answers = []
 
             for axis in self._axes:
+                if not relationship.is_valid(axis):
+                    continue
+
                 expected = relationship.generate(problem.matrix, axis)
                 answer = relationship.test(expected, problem.matrix, problem.answers, axis)
                 answers.append(answer)

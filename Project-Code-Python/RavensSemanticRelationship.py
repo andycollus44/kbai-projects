@@ -50,6 +50,16 @@ class SemanticRelationship:
         """
         pass
 
+    def is_valid(self, axis):
+        """
+        Determines whether this relationship is valid for the given axis.
+        By default all axes are valid and underlying relationships should override this method accordingly.
+
+        :param axis: The axis this relationships is being evaluated against.
+        :return: True if this relationship is valid for the given axis, False otherwise.
+        """
+        return True
+
     def __repr__(self):
         return self.name
 
