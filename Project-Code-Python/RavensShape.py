@@ -348,6 +348,9 @@ class RavensShapeMatcher:
         :return: A similarity measure where 1.0 is a perfect match and 0.0 is no match at all.
         :rtype: float
         """
+        if shape is None or other_shape is None:
+            return 0.0
+
         if match == self.MATCH_ALL:
             # Compare the shape, the filled-ness and the perimeter
             attributes = [

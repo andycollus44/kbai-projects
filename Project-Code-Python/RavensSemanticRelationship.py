@@ -1,14 +1,19 @@
 from abc import ABCMeta, abstractproperty, abstractmethod
+from collections import defaultdict
 from operator import attrgetter
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from RavensShape import RavensRelativeSizeRanker, RavensShapeExtractor, RavensShapeMatcher
+from RavensShape import (ABOVE, BELOW, INSIDE, LEFT_OF, RIGHT_OF, RavensRelativeSizeRanker, RavensShapeExtractor,
+                         RavensShapeMatcher)
 
 # Keep singleton instances available to all semantic relationships
 _extractor = RavensShapeExtractor()
 _matcher = RavensShapeMatcher()
+
+# The center of an image inside a Raven's matrix
+_cx, _cy = 184 / 2, 184 / 2
 
 
 class SemanticRelationship:
@@ -133,7 +138,7 @@ class AddKeepDelete2x2(SemanticRelationship):
 
     def _consolidate_labels(self, shapes_a, shapes_b, shapes_c):
         for index, b in enumerate(shapes_b):
-            match = self._best_shape_match(b, shapes_a)
+            match = _best_shape_match(b, shapes_a)
 
             if not match:
                 continue
@@ -141,7 +146,7 @@ class AddKeepDelete2x2(SemanticRelationship):
             b.label = match.label
 
         for c in shapes_c:
-            match = self._best_shape_match(c, shapes_a)
+            match = _best_shape_match(c, shapes_a)
 
             if not match:
                 continue
@@ -233,7 +238,7 @@ class AddKeepDelete2x2(SemanticRelationship):
             # For each of the shapes in the expected result,
             # make sure the answer under test contains it too
             for expected_shape in expected_shapes:
-                match = self._best_shape_match(expected_shape, answer_shapes)
+                match = _best_shape_match(expected_shape, answer_shapes)
 
                 if not match:
                     # This answer does not comply with all the expected shapes
@@ -245,13 +250,6 @@ class AddKeepDelete2x2(SemanticRelationship):
                 return index + 1
 
         return None
-
-    def _best_shape_match(self, shape, other_shapes):
-        # Finds the shape that best matches the given shape out of the list of the other shapes using a full matching
-        similarities = [_matcher.apply(shape, other_shape, match=_matcher.MATCH_ALL) for other_shape in other_shapes]
-        match = np.argmax(similarities)
-
-        return other_shapes[match] if similarities[match] > 0.9 else None
 
 
 class SidesArithmetic(SemanticRelationship):
@@ -580,6 +578,413 @@ class FindAndMergeCommonShapesRowColumn(SemanticRelationship3x3):
         return reconstructed
 
 
+class FindMissingCenterShapeAndApplyPattern(SemanticRelationship3x3):
+    """
+    Generates a semantic relationships that looks for the missing center shape in the complete Raven's matrix and then
+    applies a specific pattern to it.
+
+    This relationship solves specifically Basic Problem D-06.
+    """
+    _SIMILARITY_THRESHOLD = 0.9
+    _KEEP_ALL = 'KeepALL'
+    _REMOVE_LARGEST = 'RemoveLargest'
+    _PATTERNS = [_KEEP_ALL, _REMOVE_LARGEST]
+
+    @property
+    def name(self):
+        return 'Find Missing Center Shape and Apply Pattern'
+
+    def generate(self, ravens_matrix, axis):
+        shapes_per_frame = _convert_matrix_to_shapes(ravens_matrix)
+        center_shapes = _find_center_shapes(shapes_per_frame)
+
+        if len(center_shapes) == 0:
+            # No center shapes means this relationship does not apply to the given Raven's matrix
+            # so we return `None` to make sure the tester knows it is invalid
+            return None
+
+        valid_pattern = self._find_valid_pattern(shapes_per_frame, center_shapes, axis)
+
+        if valid_pattern is None:
+            # This relationship does not apply to the given Raven's matrix
+            return None
+
+        # Once the valid pattern has been found, we can find the missing center shape
+        missing_shape = _find_missing_center_shape(center_shapes)
+
+        if missing_shape is None:
+            # The patterns applies, but the relationship is actually not valid!
+            return None
+
+        # Now that we have the missing shape, we can apply the pattern to the last image
+        # and join it with the missing shape to produce the set of expected shapes
+        # Either 'H' for row-wise or 'F' for column-wise
+        shapes = shapes_per_frame[7] if axis == 0 else shapes_per_frame[5]
+        center_shape = center_shapes[7] if axis == 0 else center_shapes[5]
+
+        return self._apply_pattern(shapes, center_shape, missing_shape, valid_pattern)
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # The relationship was invalid, so no answer can be provided
+            return None
+
+        # For each answer find the one that complies with all the expected shapes
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+            if self._shapes_match(expected, answer_shapes):
+                # We have found the answer
+                return index + 1
+
+        return None
+
+    def is_valid(self, axis):
+        # Not valid for diagonals
+        return axis != 2
+
+    def _find_valid_pattern(self, shapes_per_frame, center_shapes, axis):
+        # Validate each pattern and find the one that applies based on the axis
+        valid_pattern = None
+
+        for pattern in self._PATTERNS:
+            if self._is_valid_pattern(shapes_per_frame, center_shapes, axis, pattern):
+                # We take the first valid pattern
+                valid_pattern = pattern
+                break
+
+        return valid_pattern
+
+    def _is_valid_pattern(self, shapes_per_frame, center_shapes, axis, pattern):
+        # Either 'G' for row-wise or 'C' for column-wise
+        shapes_first = shapes_per_frame[6] if axis == 0 else shapes_per_frame[2]
+        center_shape_first = center_shapes[6] if axis == 0 else center_shapes[2]
+
+        # Either 'H' for row-wise or 'F' for column-wise
+        shapes_second = shapes_per_frame[7] if axis == 0 else shapes_per_frame[5]
+        center_shape_second = center_shapes[7] if axis == 0 else center_shapes[5]
+
+        # Apply the pattern to generate a set of expected shapes for the first image
+        # using the center shape of the second image as the "missing" one
+        expected_shapes_first = self._apply_pattern(shapes_first, center_shape_first, center_shape_second, pattern)
+
+        # Test the pattern against the second image
+        return self._shapes_match(expected_shapes_first, shapes_second)
+
+    def _apply_pattern(self, shapes, center_shape, missing_shape, pattern):
+        if pattern == self._KEEP_ALL:
+            # Keep all shapes except the center one
+            shapes_to_keep = [
+                shape
+                for shape in shapes
+                if shape.label != center_shape.label
+            ]
+        elif pattern == self._REMOVE_LARGEST:
+            # Remove the largest of the shapes and keep all the other one, except the center one again
+            largest_rank = max([s.size_rank for s in shapes])
+            shapes_to_keep = [
+                shape
+                for shape in shapes
+                if shape.label != center_shape.label and shape.size_rank != largest_rank
+            ]
+        else:
+            raise ValueError('Invalid pattern: {}'.format(pattern))
+
+        # The expected shapes are the shapes after the pattern was applied and the missing center shape
+        return shapes_to_keep + [missing_shape]
+
+    def _shapes_match(self, shapes, other_shapes):
+        # Compares two sets of shapes and determines whether they all match or not
+        # Verify they both have the same number of shapes
+        if len(shapes) != len(other_shapes):
+            return False
+
+        all_match = True
+
+        # For each of the shapes make sure the other shapes contains it too
+        for shape in shapes:
+            match = _best_shape_match(shape, other_shapes)
+
+            if not match:
+                # This answer does not comply with all the expected shapes
+                all_match = False
+                break
+
+        return all_match
+
+
+class FindMissingCenterShapeAndMissingPattern(SemanticRelationship3x3):
+    """
+    Generates a semantic relationships that looks for the missing center shape in the complete Raven's matrix and also
+    finds the missing pattern, out of some known given set.
+
+    This relationship is for problems Basic Problem D-07 and Basic Problem D-08.
+    """
+    NO_PATTERN = -1
+    # Patterns for Basic Problem D-07
+    SURROUNDED_BY_SHAPES = 0
+    INSIDE_OTHER_SHAPE = 1
+    INSIDE_SAME_SHAPE = 2
+    # Patterns for Basic Problem D-08
+    FILLED_SHAPE = 3
+    EMPTY_SHAPE = 4
+
+    def __init__(self, pattern_set):
+        assert len(pattern_set) == 3, 'A set of 3 patterns must be provided!'
+        self._pattern_set = set(pattern_set)
+
+    @property
+    def name(self):
+        return 'Find Missing Center Shape and Missing Pattern'
+
+    def generate(self, ravens_matrix, axis):
+        shapes_per_frame = _convert_matrix_to_shapes(ravens_matrix)
+        center_shapes = _find_center_shapes(shapes_per_frame)
+
+        if len(center_shapes) == 0:
+            # This relationship does not apply for the given Raven's matrix
+            return None
+
+        pattern_set_is_valid = self._validate_pattern_set(shapes_per_frame, center_shapes)
+
+        if not pattern_set_is_valid:
+            # This relationship must likely does not match this problem
+            return None
+
+        # Now that we have validated the pattern set can be applied to this problem,
+        # we can find the missing center shape and the missing pattern in the last row
+        missing_shape = _find_missing_center_shape(center_shapes)
+
+        if missing_shape is None:
+            # The pattern set applies, but the relationship is actually not valid!
+            return None
+
+        missing_pattern = self._find_missing_pattern(shapes_per_frame, center_shapes)
+
+        if missing_pattern == self.NO_PATTERN:
+            # The pattern set applies, but no pattern was found, should not happen!
+            return None
+
+        # The expected result is a tuple of the missing shape and the missing pattern
+        return missing_shape, missing_pattern
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # The relationship was not valid so no answer can be given
+            return None
+
+        missing_shape, missing_pattern = expected
+
+        # For each answer, find the one that complies with the missing center shape and the missing pattern
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+            answer_center_shape = _find_center_shape(answer_shapes)
+
+            # First, validate the missing center shape is the same
+            if missing_shape.shape != answer_center_shape.shape:
+                continue
+
+            # Then, validate the answer has the missing pattern
+            answer_pattern = self._find_pattern(answer_center_shape, answer_shapes)
+            if answer_pattern != missing_pattern:
+                continue
+
+            # We have found an answer than complies with both the missing center shape and the missing pattern!
+            return index + 1
+
+        return None
+
+    def is_valid(self, axis):
+        # Only valid for rows since it's the same behavior for columns and diagonals
+        return axis == 0
+
+    def _validate_pattern_set(self, shapes_per_frame, center_shapes):
+        # Validate the provided pattern set by evaluating it against the first row and the first column
+
+        # Row patterns
+        patterns = [self._find_pattern(center_shapes[i], shapes_per_frame[i]) for i in [0, 1, 2]]
+        # The patterns found should match the provided set
+        row_is_valid = len(patterns) == len(self._pattern_set) and len(self._pattern_set - set(patterns)) == 0
+
+        # Column patterns
+        patterns = [self._find_pattern(center_shapes[i], shapes_per_frame[i]) for i in [0, 3, 6]]
+        column_is_valid = len(patterns) == len(self._pattern_set) and len(self._pattern_set - set(patterns)) == 0
+
+        return row_is_valid and column_is_valid
+
+    def _find_missing_pattern(self, shapes_per_frame, center_shapes):
+        # Finds the missing pattern, out of the provided set, in the last row of the Raven's matrix
+        shapes_g = shapes_per_frame[6]
+        center_shape_g = center_shapes[6]
+
+        shapes_h = shapes_per_frame[7]
+        center_shape_h = center_shapes[7]
+
+        # Find the pattern in 'G'
+        pattern_g = self._find_pattern(center_shape_g, shapes_g)
+        # Find the pattern in 'H'
+        pattern_h = self._find_pattern(center_shape_h, shapes_h)
+
+        # Sanity check: the patterns must not be the same!
+        if pattern_g == pattern_h:
+            return self.NO_PATTERN
+
+        # The missing pattern is the difference between the set of patterns found and the provided set
+        missing_pattern = list(self._pattern_set - {pattern_g, pattern_h})
+
+        # Another sanity check: there can't be more than 1 missing pattern!
+        if len(missing_pattern) > 1:
+            return self.NO_PATTERN
+
+        return missing_pattern[0]
+
+    def _find_pattern(self, center_shape, all_shapes):
+        # Finds the pattern that the given shapes describe, out of the known ones
+        if center_shape is None:
+            return self.NO_PATTERN
+
+        if self._is_surrounded_by_shapes(center_shape):
+            return self.SURROUNDED_BY_SHAPES
+
+        if self._is_inside_other_shape(center_shape, all_shapes):
+            return self.INSIDE_OTHER_SHAPE
+
+        if self._is_inside_same_shape(center_shape, all_shapes):
+            return self.INSIDE_SAME_SHAPE
+
+        if self._is_filled(center_shape):
+            return self.FILLED_SHAPE
+
+        if self._is_empty(center_shape):
+            return self.EMPTY_SHAPE
+
+        return self.NO_PATTERN
+
+    def _is_surrounded_by_shapes(self, shape):
+        # Determines whether the given shape is surrounded by other shapes
+        positions = shape.positions
+
+        # A shape is surrounded by others under the following conditions:
+        # - It has a shape above and below (surrounded by 2 vertically)
+        # - It has a shape right and left of it (surrounded by 2 horizontally)
+        # - It has a shape in all four positions (surrounded by 4)
+        return (BELOW in positions and ABOVE in positions or
+                LEFT_OF in positions and RIGHT_OF in positions)
+
+    def _is_inside_other_shape(self, shape, all_shapes):
+        # Determines whether the given shape is inside another **different** shape
+        parent_shapes = self._find_parent_shapes(shape, all_shapes)
+
+        if parent_shapes is None:
+            return False
+
+        # Make sure all the parent shapes are **different** to the given shape
+        for parent_shape in parent_shapes:
+            if parent_shape.shape == shape.shape:
+                return False
+
+        return True
+
+    def _is_inside_same_shape(self, shape, all_shapes):
+        # Determines whether the given shape is inside another **same** shape
+        parent_shapes = self._find_parent_shapes(shape, all_shapes)
+
+        if parent_shapes is None:
+            return False
+
+        # Make sure all the parent shapes are the **same** as the given shape
+        for parent_shape in parent_shapes:
+            if parent_shape.shape != shape.shape:
+                return False
+
+        return True
+
+    def _is_filled(self, shape):
+        # Determines whether the given shape is filled
+        return shape.filled
+
+    def _is_empty(self, shape):
+        # Determines whether the given shape is empty, i.e. not filled
+        return not shape.filled
+
+    def _find_parent_shapes(self, shape, all_shapes):
+        # Finds the parent shapes of the given shape
+        if INSIDE not in shape.positions:
+            return None
+
+        # Find the shapes inside of which this shape is
+        return list(filter(lambda x: x.label in shape.positions[INSIDE], all_shapes))
+
+
+def _convert_matrix_to_shapes(matrix):
+    # Extracts all the shapes from all frames in the matrix
+    return [_extractor.apply(frame) for row in matrix for frame in row]
+
+
+def _find_center_shapes(shapes_per_frame):
+    # Finds all center shapes of all frames in the matrix
+    center_shapes = []
+
+    for shapes in shapes_per_frame:
+        center_shape = _find_center_shape(shapes)
+
+        if center_shape is None:
+            # If we can't find one of the center shapes, then return an empty list
+            # because it means that this matrix is probably not about center shapes
+            return []
+
+        center_shapes.append(center_shape)
+
+    return center_shapes
+
+
+def _find_center_shape(shapes):
+    # Finds the center shape out of a list of shapes
+    # Filter the shapes whose centroid is closest to the center of the image
+    center_shapes = filter(lambda x: np.sqrt((_cx - x.centroid[0]) ** 2 + (_cy - x.centroid[1]) ** 2) <= 10.0, shapes)
+
+    if len(center_shapes) == 0:
+        return None
+
+    # Find the smallest one by sorting the centered shapes in increasing order of `size_rank`
+    # This handles cases where there are multiple shapes one inside the other, all technically centered
+    # but the true center one is the smallest one inside all the other ones
+    center_shapes = sorted(center_shapes, key=attrgetter('size_rank'))
+    center_shape = center_shapes[0]
+
+    return center_shape
+
+
+def _find_missing_center_shape(center_shapes):
+    # Finds the missing center shape in the complete Raven's matrix represented by the set of all center shapes
+    # Keep a dictionary of the actual shape objects so that the missing one can be retrieved
+    center_shapes_instances = {}
+    for s in center_shapes:
+        if s.shape not in center_shapes_instances:
+            center_shapes_instances[s.shape] = s
+
+    # Count each shape occurrence
+    shape_counts = defaultdict(int)
+    for s in center_shapes:
+        shape_counts[s.shape] += 1
+
+    # The missing shape is the one that has two occurrences only
+    missing_shape = None
+    missing_shapes_count = 0
+
+    for shape, count in shape_counts.items():
+        if count == 2:
+            missing_shape = shape
+            missing_shapes_count += 1
+
+    # If there are more than one missing shape or no missing shape was found,
+    # the relationship most likely does not apply
+    if missing_shapes_count > 1 or missing_shape is None:
+        return None
+
+    # Return the actual missing shape instance
+    return center_shapes_instances[missing_shape]
+
+
 def _similarity(image, other_image):
     # Computes the similarity between this image and another one using the Normalized Root Mean Squared Error
     # References:
@@ -599,3 +1004,15 @@ def _similarity(image, other_image):
 def _resize(image):
     # Reduce size of the image to 32 x 32 so that operations are faster, and similarities are easier to find
     return image.resize((32, 32), resample=Image.BICUBIC)
+
+
+def _best_shape_match(shape, other_shapes, similarity_threshold=0.9):
+    # Finds the shape that best matches the given shape out of the list of the other shapes using a full matching
+    similarities = [_matcher.apply(shape, other_shape, match=_matcher.MATCH_ALL) for other_shape in other_shapes]
+    match = np.argmax(similarities)
+
+    return other_shapes[match] if similarities[match] >= similarity_threshold else None
+
+
+def _shapes_match(shape, other_shape, similarity_threshold=0.9):
+    return _matcher.apply(shape, other_shape, match=_matcher.MATCH_ALL) >= similarity_threshold

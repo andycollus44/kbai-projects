@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractproperty
 
 from RavensSemanticRelationship import (AddKeepDelete2x2, FindAndMergeCommonShapesRowColumn,
+                                        FindMissingCenterShapeAndApplyPattern, FindMissingCenterShapeAndMissingPattern,
                                         FindMissingFrame, InvertedDiagonalUnion, ShapeFillPointsSystem3x3,
                                         ShapeScaling3x3, SidesArithmetic)
 
@@ -90,7 +91,18 @@ class _RavensSemantic3x3Solver(RavensSemanticSolver):
             ShapeFillPointsSystem3x3(),
             InvertedDiagonalUnion(),
             FindMissingFrame(),
-            FindAndMergeCommonShapesRowColumn()
+            FindAndMergeCommonShapesRowColumn(),
+            FindMissingCenterShapeAndApplyPattern(),
+            FindMissingCenterShapeAndMissingPattern([
+                FindMissingCenterShapeAndMissingPattern.SURROUNDED_BY_SHAPES,
+                FindMissingCenterShapeAndMissingPattern.INSIDE_OTHER_SHAPE,
+                FindMissingCenterShapeAndMissingPattern.INSIDE_SAME_SHAPE
+            ]),
+            FindMissingCenterShapeAndMissingPattern([
+                FindMissingCenterShapeAndMissingPattern.FILLED_SHAPE,
+                FindMissingCenterShapeAndMissingPattern.EMPTY_SHAPE,
+                FindMissingCenterShapeAndMissingPattern.INSIDE_SAME_SHAPE
+            ])
         ]
 
     @property
