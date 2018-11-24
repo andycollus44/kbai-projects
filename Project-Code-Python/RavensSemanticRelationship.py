@@ -6,11 +6,12 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from RavensShape import (ABOVE, BELOW, INSIDE, LEFT_OF, RIGHT_OF, RavensRelativeSizeRanker, RavensShapeExtractor,
-                         RavensShapeMatcher)
+                         RavensShapeIdentifier, RavensShapeMatcher)
 
 # Keep singleton instances available to all semantic relationships
 _extractor = RavensShapeExtractor()
 _matcher = RavensShapeMatcher()
+_identifier = RavensShapeIdentifier()
 
 # The center of an image inside a Raven's matrix
 _cx, _cy = 184 / 2, 184 / 2
@@ -414,26 +415,50 @@ class InvertedDiagonalUnion(SemanticRelationship3x3):
         return 'Inverted Diagonal Union'
 
     def generate(self, ravens_matrix, axis):
+        if not self._validate(ravens_matrix):
+            return None
+
         # Irrespective of the axis, join image 'C' with image 'G'
         image_c = np.array(ravens_matrix[0][2])
         image_g = np.array(ravens_matrix[2][0])
 
-        # The union operation as defined by Kunda in his doctoral dissertation
-        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
-        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
-        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
-        merged = np.minimum(image_c, image_g)
+        merged = self._union(image_c, image_g)
 
         # Reconstruct the image back to its Pillow representation
         return Image.fromarray(merged)
 
     def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # The relationship does not apply to this problem so no answer can be given
+            return None
+
         # For each answer, find the one that matches the expected image most closely based on a defined threshold
         for index, answer in enumerate(answers):
             if _similarity(expected, answer) >= self._SIMILARITY_THRESHOLD:
                 return index + 1
 
         return None
+
+    def is_valid(self, axis):
+        # Only valid for rows, since the same behavior applies for columns and diagonals
+        return axis == 0
+
+    def _validate(self, matrix):
+        # Validate this relationship applies to this problem by confirming that 'B' + 'D' = 'E'
+        image_b = np.array(matrix[0][1])
+        image_d = np.array(matrix[1][0])
+        image_e = matrix[1][1]
+
+        merged = Image.fromarray(self._union(image_b, image_d))
+
+        return _similarity(merged, image_e) >= self._SIMILARITY_THRESHOLD
+
+    def _union(self, image_1, image_2):
+        # The union operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        return np.minimum(image_1, image_2)
 
 
 class FindMissingFrame(SemanticRelationship3x3):
@@ -525,6 +550,10 @@ class FindAndMergeCommonShapesRowColumn(SemanticRelationship3x3):
         return reconstructed
 
     def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # This relationship does not apply and no answer can be given
+            return None
+
         # For each answer, find the one that matches the expected image most closely based on a defined threshold
         similarities = [_similarity(expected, answer) for answer in answers]
         best = np.argmax(similarities)
@@ -554,9 +583,9 @@ class FindAndMergeCommonShapesRowColumn(SemanticRelationship3x3):
         reconstructed = Image.new('L', (184, 184), 255)
         draw = ImageDraw.Draw(reconstructed)
 
-        # Handle reconstructing blank images
+        # This most likely means this relationship does not apply to this problem since we are expecting common shapes
         if len(shapes) == 0:
-            return reconstructed
+            return None
 
         # Run the ranker to assign new size ranks to the reconstructed image
         # This is very important because previous ranks are not valid anymore,
@@ -913,6 +942,229 @@ class FindMissingCenterShapeAndMissingPattern(SemanticRelationship3x3):
 
         # Find the shapes inside of which this shape is
         return list(filter(lambda x: x.label in shape.positions[INSIDE], all_shapes))
+
+
+class FindMissingImagePattern(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that looks for the missing image pattern that should be valid in groups of three
+    for each image in the Raven's matrix. In other words, image 'A' should have two other pairs that match the result of
+    applying the patterns, at the image level.
+
+    For problem Basic Problem D-09.
+    """
+    _SIMILARITY_THRESHOLD = 0.9
+
+    # Pattern for Basic Problem D-09
+    ROTATION_AND_UNION = 0
+
+    def __init__(self, pattern):
+        self._pattern = pattern
+
+    @property
+    def name(self):
+        return 'Find Missing Image Pattern'
+
+    def generate(self, ravens_matrix, axis):
+        for row in ravens_matrix:
+            for frame in row:
+                # Apply the pattern to each frame in the Raven's matrix
+                unmatched = self._apply_pattern(frame, ravens_matrix)
+
+                if unmatched is None:
+                    # This relationship must likely does not apply to this problem
+                    return None
+
+                if len(unmatched) == 1:
+                    # We have found the missing pattern!
+                    return unmatched[0]
+
+        # No missing patterns, which means this relationship probably does not apply
+        return None
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # This relationship is not valid so no answer can be given
+            return None
+
+        # For each answer find the one that matches the expected missing one
+        similarities = [_similarity(expected, answer) for answer in answers]
+        best = np.argmax(similarities)
+
+        return best + 1 if similarities[best] >= self._SIMILARITY_THRESHOLD else None
+
+    def is_valid(self, axis):
+        # Only valid for rows since it's the same behavior for columns and diagonals
+        return axis == 0
+
+    def _apply_pattern(self, image, matrix):
+        # Applies the pattern to the given image (or frame) of the Raven's matrix
+        unmatched = []
+        if self._pattern == self.ROTATION_AND_UNION:
+            # Rotate and merge the image
+            rotated = self._apply_rotation(image)
+            merged = self._apply_union(image, rotated)
+
+            # For this pattern, the image must have a match for its rotated version
+            # and a match for the union of the image with the rotated version
+            if not self._has_match(rotated, matrix):
+                unmatched.append(rotated)
+
+            if not self._has_match(merged, matrix):
+                unmatched.append(merged)
+        else:
+            raise ValueError('Invalid pattern: {}!'.format(self._pattern))
+
+        # Return `None` for those case where there are more than one pattern missing
+        # since that means this problem does not fit with this relationship
+        return unmatched if len(unmatched) <= 1 else None
+
+    def _apply_rotation(self, image):
+        # Rotates the image
+        return Image.fromarray(np.rot90(image))
+
+    def _apply_union(self, image_1, image_2):
+        # The union operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use minimum instead of maximum because Kunda assumed that the images had a value of 0 for white
+        # but, in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        return Image.fromarray(np.minimum(image_1, image_2))
+
+    def _has_match(self, image, matrix):
+        # Checks to see if the given image can be found in the other frames of the Raven's matrix
+        for row in matrix:
+            for frame in row:
+                if self._images_match(image, frame):
+                    return True
+
+        return False
+
+    def _images_match(self, image_1, image_2):
+        return _similarity(image_1, image_2) >= self._SIMILARITY_THRESHOLD
+
+
+class FindMissingShapeAndCount(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that finds the missing shape and its count in the Raven's matrix.
+    This relationship is specifically for problem Basic Problem D-12.
+    """
+
+    @property
+    def name(self):
+        return 'Find Missing Shape and Count'
+
+    def generate(self, ravens_matrix, axis):
+        shape_counts = defaultdict(int)
+
+        # For each frame in the Raven's matrix, extract its shape and count
+        for row in ravens_matrix:
+            for frame in row:
+                result = self._count(frame)
+
+                if result is None:
+                    # This relationship do not apply to this problem
+                    return None
+
+                # Accumulate the count by shape
+                shape, count = result
+                shape_counts[shape] += count
+
+        # Count the number of occurrences for each count
+        common_counts = defaultdict(int)
+        for count in shape_counts.values():
+            common_counts[count] += 1
+
+        # If there are more than 2 common counts, then this problem does not
+        # fit with this relationship because only one count should be different
+        if len(common_counts.keys()) != 2:
+            return None
+
+        # Find the count that has less occurrences, this is the count that has
+        # some of its elements missing
+        count_with_least_occurrences = min(common_counts, key=common_counts.get)
+        count_with_most_occurrences = max(common_counts, key=common_counts.get)
+
+        # Now compute the number that is missing which should be the difference
+        # between the count with the least occurrences and the count with the most
+        # occurrences
+        missing_count = abs(count_with_most_occurrences - count_with_least_occurrences)
+
+        # Finally, find the shape that has the count with the least occurrences,
+        # this is the shape that needs to be present in the answer
+        missing_shape = None
+        for shape, count in shape_counts.iteritems():
+            if count == count_with_least_occurrences:
+                missing_shape = shape
+
+        # Sanity check: if no missing shape was found, this relationship most likely
+        # does not apply to this problem
+        if missing_shape is None:
+            return None
+
+        # The expected result is the tuple of missing shape and missing count
+        return missing_shape, missing_count
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # The relationship was not valid so no answer can be given
+            return None
+
+        missing_shape, missing_count = expected
+
+        # For each answer, find the one that complies with the missing shape and the missing count
+        for index, answer in enumerate(answers):
+            answer_result = self._count(answer)
+
+            if answer_result is None:
+                continue
+
+            answer_common_shape, answer_count = answer_result
+
+            # First, validate the missing shape is the same
+            if missing_shape != answer_common_shape:
+                continue
+
+            # Then, validate the answer has the missing count
+            if answer_count != missing_count:
+                continue
+
+            # We have found an answer than complies with both the missing shape and the missing count!
+            return index + 1
+
+        return None
+
+    def is_valid(self, axis):
+        # Only valid for rows since it's the same behavior for columns and diagonals
+        return axis == 0
+
+    def _count(self, frame):
+        # Extracts the common shape of the frame and its count
+        shapes = _extractor.apply(frame)
+
+        if len(shapes) == 0:
+            # No shapes were found which means this problem is not adequate for this relationship
+            return None
+
+        # Validate that all shapes inside a frame are the same
+        if not self._all_shapes_are_equal(shapes):
+            # If they are not, this relationship most likely does not apply with this pattern
+            return None
+
+        # Use the RavensShapeIdentifier, which is based on common components, to count the shapes
+        # the reason being that the RavensShapeExtractor sometimes extracts less shapes because
+        # they are too close to each other; however, that works for most problems so changing the
+        # logic in the extractor will probably affect a lot of other problems (overfitting much?)
+        # so it is a safer bet to count using the identifier's algorithm.
+        identified_shapes = _identifier.apply(frame)
+
+        return self._extract_common_shape(shapes), len(identified_shapes)
+
+    def _all_shapes_are_equal(self, shapes):
+        # Checks that all shapes, in the given list, are all equal
+        return len(set([s.shape for s in shapes])) == 1
+
+    def _extract_common_shape(self, shapes):
+        # Extracts the common shape of a list of shapes, which is assumed to be all equal shapes
+        return list(set([s.shape for s in shapes]))[0]
 
 
 def _convert_matrix_to_shapes(matrix):

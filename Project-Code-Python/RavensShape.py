@@ -1515,14 +1515,10 @@ class _ConnectedComponentsAlgorithm:
         :return: An array of the same size as `image` with the labels
         :rtype: ndarray
         """
-        # Convert each image into a black and white bi-level representation using a custom threshold since Pillow
-        # dithers the image adding noise to it. A threshold of 60 was used because only the darkest contours should
-        # be kept which helps separating shapes that are "joined" by some lighter grayish pixels that to the human eye
-        # are white, but to the image processing library they are still darkish which affects the algorithm.
-        # So, anything that is not darker than 60 intensity value, i.e. very black, is considered white.
-        # 60 was chosen arbitrarily after empirical experimentation
+        # Convert each image into a black and white bi-level representation
+        # Use a custom threshold since Pillow dithers the image adding noise to it
         # Reference: https://stackoverflow.com/a/50090612
-        binary_image = np.array(image.copy().point(lambda x: 1 if x > 60 else 0))
+        binary_image = np.array(image.copy().point(lambda x: 1 if x > 200 else 0))
         labeled_image = np.full_like(binary_image, self._UNASSIGNED, dtype=np.int)
 
         label = 0
