@@ -1232,6 +1232,122 @@ class DeleteCommonShapesAndKeepCenterShape(SemanticRelationship3x3):
         return reconstructed
 
 
+class ShapeCountAndAnglePointsSystem(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that counts the difference in number of shapes between two images and also applies
+    a points system based on the angles of the shapes inside those images.
+
+    For Problem Basic E-12.
+    """
+    _POINTS_ANGLE_1 = 1
+    _POINTS_ANGLE_2 = -1
+    _POINTS_INVALID_ANGLE = -9999
+
+    @property
+    def name(self):
+        return 'Shape Count and Angle Points System'
+
+    def generate(self, ravens_matrix, axis):
+        # Extract the shapes for the first and second image
+        shapes_1 = _extractor.apply(self._select_first_image(ravens_matrix, axis))
+        shapes_2 = _extractor.apply(self._select_second_image(ravens_matrix, axis))
+
+        # We constrain this relationship to work only for problems where all shapes are the same
+        # to avoid answering other problems incorrectly
+        if not self._all_shapes_are_equal(shapes_1 + shapes_2):
+            return None
+
+        # Extract the rounded angles for both images and join them
+        angles = list(set(self._extract_rounded_angles(shapes_1) + self._extract_rounded_angles(shapes_2)))
+
+        if len(angles) == 0 or len(angles) > 2:
+            # If there are no angles or there are more than 2 distinct angles, then this
+            # relationship most likely does not apply to this problem
+            return None
+
+        # Now count the points for each image based on the system
+        points_1 = self._count_points(shapes_1, angles)
+        points_2 = self._count_points(shapes_2, angles)
+
+        # The expected result is the difference in count of shapes, the sum of points and the angles used
+        return len(shapes_1) - len(shapes_2), points_1 + points_2, angles
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # Invalid relationship so no answer can be given
+            return None
+
+        expected_count_shapes, expected_points, angles = expected
+
+        # For each answer, extract the shapes and rounded angles, and count their points
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+
+            # First, check the count of shapes matches
+            if len(answer_shapes) != expected_count_shapes:
+                continue
+
+            answer_angles = self._extract_rounded_angles(answer_shapes)
+
+            # Then, validate that the angles of the answer are in the set of angles used
+            # to generate the expected result in order to ensure consistency
+            if not set(answer_angles).issubset(set(angles)):
+                continue
+
+            # Finally, check the points of the given answer using those same angles
+            answer_points = self._count_points(answer_shapes, angles)
+
+            if answer_points == expected_points:
+                # We have found the answer whose points match the expected result!
+                return index + 1
+
+        return None
+
+    def is_valid(self, axis):
+        # Only valid for rows and columns
+        return axis != 2
+
+    def _all_shapes_are_equal(self, shapes):
+        return len(set([s.shape for s in shapes])) == 1
+
+    def _extract_rounded_angles(self, shapes):
+        # Extracts and returns the rounded angles to the nearest multiple of 10
+        return [
+            self._round_to_nearest_multiple_of_ten(s.angle)
+            for s in shapes
+        ]
+
+    def _count_points(self, shapes, angles):
+        if len(shapes) == 0:
+            # Handle blank images by setting the points to 0
+            return 0
+
+        points = 0
+
+        # Compute the points based on the rounded angle of each shape
+        for s in shapes:
+            rounded_angle = self._round_to_nearest_multiple_of_ten(s.angle)
+
+            if rounded_angle == angles[0]:
+                points += self._POINTS_ANGLE_1
+            elif rounded_angle == angles[1]:
+                points += self._POINTS_ANGLE_2
+            else:
+                points += self._POINTS_INVALID_ANGLE
+
+        return points
+
+    def _round_to_nearest_multiple_of_ten(self, number):
+        # Rounds a number to the nearest multiple of 10
+        # Smaller multiple
+        smaller_multiple = (number // 10) * 10
+        # Larger multiple
+        larger_multiple = smaller_multiple + 10
+
+        # Return the closes of the two
+        return larger_multiple if number - smaller_multiple > larger_multiple - number else smaller_multiple
+
+
 def _convert_matrix_to_shapes(matrix):
     # Extracts all the shapes from all frames in the matrix
     return [_extractor.apply(frame) for row in matrix for frame in row]

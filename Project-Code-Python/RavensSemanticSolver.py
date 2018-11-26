@@ -4,7 +4,8 @@ from RavensSemanticRelationship import (AddKeepDelete2x2, DeleteCommonShapesAndK
                                         FindMissingShapeAndCount, FindAndMergeCommonShapesRowColumn,
                                         FindMissingCenterShapeAndApplyPattern, FindMissingCenterShapeAndMissingPattern,
                                         FindMissingFrame, FindMissingImagePattern, InvertedDiagonalUnion,
-                                        ShapeFillPointsSystem3x3, ShapeScaling3x3, SidesArithmetic)
+                                        ShapeCountAndAnglePointsSystem, ShapeFillPointsSystem3x3, ShapeScaling3x3,
+                                        SidesArithmetic)
 
 
 class RavensSemanticSolverFactory:
@@ -90,6 +91,7 @@ class _RavensSemantic3x3Solver(RavensSemanticSolver):
         return [
             ShapeScaling3x3(),
             ShapeFillPointsSystem3x3(),
+            ShapeCountAndAnglePointsSystem(),
             InvertedDiagonalUnion(),
             FindMissingFrame(),
             FindAndMergeCommonShapesRowColumn(),
