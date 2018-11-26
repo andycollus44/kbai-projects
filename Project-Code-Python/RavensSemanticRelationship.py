@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 
 from RavensShape import (ABOVE, BELOW, INSIDE, LEFT_OF, RIGHT_OF, RavensRelativeSizeRanker, RavensShapeExtractor,
                          RavensShapeIdentifier, RavensShapeMatcher)
+from RavensTransformation import InvertedXORTransformation
 
 # Keep singleton instances available to all semantic relationships
 _extractor = RavensShapeExtractor()
@@ -543,6 +544,11 @@ class FindAndMergeCommonShapesRowColumn(SemanticRelationship3x3):
         # Find the common shapes between 'G' and 'H', and 'C' and 'F'
         common_shapes_g_h = self._find_common_shapes(shapes_g, shapes_h)
         common_shapes_c_f = self._find_common_shapes(shapes_c, shapes_f)
+
+        if len(common_shapes_g_h) == 0 or len(common_shapes_c_f) == 0:
+            # If there are not common shapes in the row or in the column,
+            # then this relationship must likely does not apply to the problem
+            return None
 
         # The expected answer is a reconstructed image of the merge of the common shapes of the row and column
         reconstructed = self._reconstruct(common_shapes_g_h + common_shapes_c_f)
@@ -1165,6 +1171,65 @@ class FindMissingShapeAndCount(SemanticRelationship3x3):
     def _extract_common_shape(self, shapes):
         # Extracts the common shape of a list of shapes, which is assumed to be all equal shapes
         return list(set([s.shape for s in shapes]))[0]
+
+
+class DeleteCommonShapesAndKeepCenterShape(SemanticRelationship3x3):
+    """
+    Generates a relationship that deletes the common shape between two images, but keeps the center shape.
+    For problem Basic Problem E-06.
+    """
+    _SIMILARITY_THRESHOLD = 0.9
+
+    def __init__(self):
+        self._inverted_xor_transformation = InvertedXORTransformation()
+
+    @property
+    def name(self):
+        return 'Delete Common Shapes and Keep Center Shape'
+
+    def generate(self, ravens_matrix, axis):
+        # First, find the center shape in image 'G'
+        shapes_g = _extractor.apply(ravens_matrix[2][0])
+        center_shape = _find_center_shape(shapes_g)
+
+        if center_shape is None:
+            # No center shape means this relationship most likely does not apply
+            return None
+
+        # Then, delete the common shapes by applying an inverter XOR transformation
+        # between images 'G' and 'H'
+        xor_g_h = self._inverted_xor_transformation.apply(ravens_matrix[2][0], other=ravens_matrix[2][1])
+
+        # Finally, reconstruct the image by adding the center shape back
+        reconstructed = self._reconstruct(xor_g_h, center_shape)
+
+        return reconstructed
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # Invalid relationship so no answer can be given
+            return None
+
+        # For each answer, find the one that matches the expected image most closely based on a defined threshold
+        similarities = [_similarity(expected, answer) for answer in answers]
+        best = np.argmax(similarities)
+
+        return best + 1 if similarities[best] >= self._SIMILARITY_THRESHOLD else None
+
+    def is_valid(self, axis):
+        # Only valid for rows since it's the same behavior for columns and diagonals
+        return axis == 0
+
+    def _reconstruct(self, image, center_shape):
+        reconstructed = image.copy()
+        draw = ImageDraw.Draw(reconstructed)
+
+        # Reconstruct the image by drawing the center shape
+        draw.polygon(center_shape.contour.flatten().tolist(), fill=0 if center_shape.filled else 255, outline=0)
+        # Add an extra line over the contour to darken it so that it helps with matching
+        draw.line(center_shape.contour.flatten().tolist(), fill=0, width=3)
+
+        return reconstructed
 
 
 def _convert_matrix_to_shapes(matrix):
