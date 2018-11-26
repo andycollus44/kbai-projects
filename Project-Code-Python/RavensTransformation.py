@@ -706,3 +706,34 @@ class CenteredInvertedXORWithOffsetTransformation(MultiTransformation):
 
     def _offset_image(self, image, offset, axis):
         return Image.fromarray(np.roll(np.array(image), offset, axis))
+
+
+class ImageSegmentTopBottomUnion(MultiTransformation):
+    """
+    An image segment top-bottom union transformation segments two images in half vertically and merges the top segment
+    of the first one with the bottom segment of the second one.
+
+    For problem Basic Problem E-09.
+    """
+
+    @property
+    def name(self):
+        return 'ImageSegmentTopBottomUnion'
+
+    def apply(self, image, **kwargs):
+        super(ImageSegmentTopBottomUnion, self)._validate(**kwargs)
+
+        im = np.array(image.copy())
+        other_im = np.array(kwargs['other'].copy())
+
+        # First, segment the images vertically in half
+        half = image.height / 2
+        # In an image, the 'x' coordinate is the row so we slice using the x-axis
+        segmented = [im[0:half, :], im[half:, :]]
+        other_segmented = [other_im[0:half, :], other_im[half:, :]]
+
+        # Then, merge the top segment of the first image and the bottom segment of the other image
+        merged = np.vstack((segmented[0], other_segmented[1]))
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(merged)

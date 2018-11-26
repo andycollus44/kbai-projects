@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, CenteredInvertedXORWithOffsetTransformation, FlipTransformation,
-                                  ImageDuplication, ImageSegmentTopDownDeletion,
+                                  ImageDuplication, ImageSegmentTopBottomUnion, ImageSegmentTopDownDeletion,
                                   ImageSwitchSidesHorizontallyTransformation, InvertedXORTransformation,
                                   MirrorTransformation, NoOpTransformation, RotationTransformation,
                                   RotationAndUnionTransformation, ShapeFillTransformation, UnionTransformation,
@@ -293,7 +293,9 @@ class _Ravens3x3Solver(RavensProblemSolver):
             # - Basic Problem E-03 (row or column)
             UnionTransformation(),
             # Example: Basic Problem E-04 (row or column)
-            CenteredInvertedXORWithOffsetTransformation()
+            CenteredInvertedXORWithOffsetTransformation(),
+            # Example: Basic Problem E-09 (row or column)
+            ImageSegmentTopBottomUnion()
         ]
 
     @property
