@@ -737,3 +737,26 @@ class ImageSegmentTopBottomUnion(MultiTransformation):
 
         # Reconstruct the image back to its Pillow representation
         return Image.fromarray(merged)
+
+
+class IntersectionTransformation(MultiTransformation):
+    """
+    An intersection transformations finds the common elements between two images.
+    For problems Basic Problem E-10 and Basic Problem E-11.
+    """
+
+    @property
+    def name(self):
+        return 'Intersection'
+
+    def apply(self, image, **kwargs):
+        super(IntersectionTransformation, self)._validate(**kwargs)
+
+        # The intersection operation as defined by Kunda in his doctoral dissertation
+        # Reference: https://smartech.gatech.edu/bitstream/handle/1853/47639/kunda_maithilee_201305_phd.pdf
+        # Here we use maximum instead of minimum, because Kunda assumed that the images had a value of 0 for white but,
+        # in reality, 0 indicates a black pixel and 255 (or 1 if the image is binary) is white
+        intersection = np.maximum(image, kwargs['other'])
+
+        # Reconstruct the image back to its Pillow representation
+        return Image.fromarray(intersection)

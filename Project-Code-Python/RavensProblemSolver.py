@@ -8,10 +8,10 @@ from PIL import Image
 
 from RavensTransformation import (SINGLE, MULTI, CenteredInvertedXORWithOffsetTransformation, FlipTransformation,
                                   ImageDuplication, ImageSegmentTopBottomUnion, ImageSegmentTopDownDeletion,
-                                  ImageSwitchSidesHorizontallyTransformation, InvertedXORTransformation,
-                                  MirrorTransformation, NoOpTransformation, RotationTransformation,
-                                  RotationAndUnionTransformation, ShapeFillTransformation, UnionTransformation,
-                                  XORTransformation)
+                                  ImageSwitchSidesHorizontallyTransformation, IntersectionTransformation,
+                                  InvertedXORTransformation, MirrorTransformation, NoOpTransformation,
+                                  RotationTransformation, RotationAndUnionTransformation, ShapeFillTransformation,
+                                  UnionTransformation, XORTransformation)
 
 Answer = namedtuple('Answer', ['similarity', 'answer'])
 
@@ -295,7 +295,11 @@ class _Ravens3x3Solver(RavensProblemSolver):
             # Example: Basic Problem E-04 (row or column)
             CenteredInvertedXORWithOffsetTransformation(),
             # Example: Basic Problem E-09 (row or column)
-            ImageSegmentTopBottomUnion()
+            ImageSegmentTopBottomUnion(),
+            # Examples:
+            # - Basic Problem E-10 (row or column)
+            # - Basic Problem E-11 (row or column)
+            IntersectionTransformation()
         ]
 
     @property
