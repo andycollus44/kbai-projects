@@ -647,3 +647,62 @@ class InvertedXORTransformation(MultiTransformation):
         diff = ImageOps.invert(Image.fromarray(diff).point(lambda x: 255 if x > 60 else 0))
 
         return diff
+
+
+class CenteredInvertedXORWithOffsetTransformation(MultiTransformation):
+    """
+    A centered inverted XOR with offset transformation finds the difference between two images, where the second image
+    is offset by a particular amount, to construct a third image which, in turn, is centered.
+    """
+    # This offset is probably overfitting too much, but we don't have other option!
+    _OFFSET = 50
+
+    def __init__(self):
+        self._inverted_xor_transformation = InvertedXORTransformation()
+
+    @property
+    def name(self):
+        return 'CenteredInvertedXORWithOffset'
+
+    def apply(self, image, **kwargs):
+        super(CenteredInvertedXORWithOffsetTransformation, self)._validate(**kwargs)
+
+        if kwargs.get('axis', None) is None:
+            raise ValueError('Transformation {} requires parameter `axis`'.format(self.name))
+
+        if kwargs['axis'] == 0:
+            return self._apply_row(image, kwargs['other'])
+        elif kwargs['axis'] == 1:
+            return self._apply_column(image, kwargs['other'])
+        else:
+            # This transformation does not apply to diagonals, so we return a black image
+            return Image.new(image.mode, image.size)
+
+    def _apply_row(self, image, other_image):
+        # First, offset the other image to the left horizontally
+        other_image_left = self._offset_image(other_image, -self._OFFSET, 1)
+
+        # Then, apply the inverted XOR transformation with the image
+        inverted_xor = self._inverted_xor_transformation.apply(image, other=other_image_left)
+
+        # Finally, offset the result horizontally to the left to center the new image
+        # We use half the offset to move it back just slightly, this again is probably overfitting
+        centered = self._offset_image(inverted_xor, -self._OFFSET / 2, 1)
+
+        return centered
+
+    def _apply_column(self, image, other_image):
+        # First, offset the other image to the bottom vertically
+        other_image_bottom = self._offset_image(other_image, self._OFFSET, 0)
+
+        # Then, apply the inverted XOR transformation with the image
+        inverted_xor = self._inverted_xor_transformation.apply(image, other=other_image_bottom)
+
+        # Finally, offset the result vertically to the bottom to center the new image
+        # We use half the offset to move it back just slightly, this again is probably overfitting
+        centered = self._offset_image(inverted_xor, self._OFFSET / 2, 0)
+
+        return centered
+
+    def _offset_image(self, image, offset, axis):
+        return Image.fromarray(np.roll(np.array(image), offset, axis))

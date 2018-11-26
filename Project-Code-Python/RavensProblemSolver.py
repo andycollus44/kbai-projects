@@ -6,7 +6,8 @@ from operator import itemgetter
 import numpy as np
 from PIL import Image
 
-from RavensTransformation import (SINGLE, MULTI, FlipTransformation, ImageDuplication, ImageSegmentTopDownDeletion,
+from RavensTransformation import (SINGLE, MULTI, CenteredInvertedXORWithOffsetTransformation, FlipTransformation,
+                                  ImageDuplication, ImageSegmentTopDownDeletion,
                                   ImageSwitchSidesHorizontallyTransformation, InvertedXORTransformation,
                                   MirrorTransformation, NoOpTransformation, RotationTransformation,
                                   RotationAndUnionTransformation, ShapeFillTransformation, UnionTransformation,
@@ -286,7 +287,13 @@ class _Ravens3x3Solver(RavensProblemSolver):
             # - Basic Problem E-08 (row or column)
             # - Challenge Problem E-01 (row or column)
             InvertedXORTransformation(),
-            UnionTransformation()
+            # Examples:
+            # - Basic Problem E-01 (row or column)
+            # - Basic Problem E-02 (row or column)
+            # - Basic Problem E-03 (row or column)
+            UnionTransformation(),
+            # Example: Basic Problem E-04 (row or column)
+            CenteredInvertedXORWithOffsetTransformation()
         ]
 
     @property
@@ -332,7 +339,7 @@ class _Ravens3x3Solver(RavensProblemSolver):
         image_1 = self._select_first_image(matrix, axis)
         image_2 = self._select_second_image(matrix, axis)
         # Apply the multi-transformation to these two images to obtain the expected result
-        expected = transformation.apply(image_1, other=image_2)
+        expected = transformation.apply(image_1, other=image_2, axis=axis)
 
         # For each answer, test its similarity with the expected result, i.e. generate and test
         similarities = [super(_Ravens3x3Solver, self)._similarity(expected, answer) for answer in answers]
@@ -367,8 +374,8 @@ class _Ravens3x3Solver(RavensProblemSolver):
 
         for image_1, image_2, image_3 in images:
             # If a triplet doesn't match then the transformation is most likely not applicable
-            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, other=image_2), image_3,
-                                                              confidence=transformation.confidence):
+            if not super(_Ravens3x3Solver, self)._are_similar(transformation.apply(image_1, other=image_2, axis=axis),
+                                                              image_3, confidence=transformation.confidence):
                 return False
 
         return True
