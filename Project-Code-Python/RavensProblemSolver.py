@@ -53,8 +53,8 @@ class RavensProblemSolver:
         """
         # Apply each transformation for each valid axis defined by the underlying solver
         answers = [self._apply(problem, transformation, axis)
-                   for axis in self._axes
-                   for transformation in self._transforms]
+                   for transformation in self._transforms
+                   for axis in self._axes]
 
         # To give more importance to the answers that were selected by more transformations/axes
         # we group them by answer and aggregate its similarities with the idea that if an
@@ -299,12 +299,16 @@ class _Ravens3x3Solver(RavensProblemSolver):
             # Examples:
             # - Basic Problem E-10 (row or column)
             # - Basic Problem E-11 (row or column)
-            IntersectionTransformation()
+            IntersectionTransformation(),
+            # Example: Challenge Problem D-02
+            RotationTransformation(180),
+            # Example: Challenge Problem D-04
+            RotationTransformation(90)
         ]
 
     @property
     def _axes(self):
-        return [0, 1, 2]
+        return [0, 1]
 
     def _apply(self, problem, transformation, axis):
         if transformation.type is SINGLE:

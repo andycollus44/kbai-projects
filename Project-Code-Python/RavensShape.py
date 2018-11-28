@@ -42,6 +42,8 @@ PENTAGON = 'PENTAGON'
 HEXAGON = 'HEXAGON'
 HEPTAGON = 'HEPTAGON'
 OCTAGON = 'OCTAGON'
+DECAGON = 'DECAGON'
+DODECAGON = 'DODECAGON'
 CIRCLE = 'CIRCLE'
 
 # Relative positions
@@ -429,7 +431,9 @@ class RavensShapeTemplateClassifier:
         'PENTAGON': 5,
         'HEXAGON': 6,
         'HEPTAGON': 7,
-        'OCTAGON': 8
+        'OCTAGON': 8,
+        'DECAGON': 10,
+        'DODECAGON': 12
     }
     _RESAMPLING = 64
     _SCALE = 250.0

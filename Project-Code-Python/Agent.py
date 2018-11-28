@@ -16,6 +16,10 @@ from RavensVisualProblem import RavensVisualProblemFactory
 _BLACKLISTED_PROBLEMS = {
     # Takes a long time due to its weird line-based patterns which slows down the shape extractor
     'Challenge Problem C-08',
+    # Takes a long time and it is not worth it since it cannot find the correct answer either way
+    'Challenge Problem D-06',
+    # Takes a long time due to its weird line-based patterns which slows down the shape extractor
+    'Challenge Problem D-07',
     # Unfortunately, Challenge Problem E-12 causes an infinite loop somewhere in the shape extractor
     'Challenge Problem E-12'
 }

@@ -259,6 +259,7 @@ class SidesArithmetic(SemanticRelationship):
     Generates a semantic relationship of arithmetic between frames based on shapes' sides for 2x2 matrices.
     This semantic relationship is only going to be valid for problems where there are geometric figures.
     """
+
     @property
     def name(self):
         return 'Sides Arithmetic'
@@ -370,6 +371,11 @@ class ShapeScaling3x3(SemanticRelationship3x3):
         shapes_1 = _extractor.apply(self._select_first_image(ravens_matrix, axis))
         shapes_2 = _extractor.apply(self._select_second_image(ravens_matrix, axis))
 
+        # Validate this relationship applies to the given problem by requiring that all shapes
+        # are equal as the original problem did which this relationship is based on
+        if not self._all_shapes_are_equal(shapes_1 + shapes_2):
+            return None
+
         # Now compute the total size of all the shapes
         size_1 = self._compute_total_size(shapes_1)
         size_2 = self._compute_total_size(shapes_2)
@@ -378,6 +384,10 @@ class ShapeScaling3x3(SemanticRelationship3x3):
         return size_1 - size_2
 
     def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # Invalid relationship so no answer can be given
+            return None
+
         # Get the shapes for the second image and compute their total size
         shapes = _extractor.apply(self._select_second_image(ravens_matrix, axis))
         size = self._compute_total_size(shapes)
@@ -394,6 +404,9 @@ class ShapeScaling3x3(SemanticRelationship3x3):
                 return index + 1
 
         return None
+
+    def _all_shapes_are_equal(self, shapes):
+        return len(set([s.shape for s in shapes])) == 1
 
     def _compute_total_size(self, shapes):
         if len(shapes) == 0:
@@ -1178,7 +1191,7 @@ class DeleteCommonShapesAndKeepCenterShape(SemanticRelationship3x3):
     Generates a relationship that deletes the common shape between two images, but keeps the center shape.
     For problem Basic Problem E-06.
     """
-    _SIMILARITY_THRESHOLD = 0.9
+    _SIMILARITY_THRESHOLD = 0.91
 
     def __init__(self):
         self._inverted_xor_transformation = InvertedXORTransformation()
@@ -1346,6 +1359,226 @@ class ShapeCountAndAnglePointsSystem(SemanticRelationship3x3):
 
         # Return the closes of the two
         return larger_multiple if number - smaller_multiple > larger_multiple - number else smaller_multiple
+
+
+class PartitionShapeIntoSmallerShapesWithSameRotation(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship that partitions a shape it into smaller shapes maintaining the original rotation.
+    For problem Challenge Problem D-10.
+    """
+    _TOLERANCE = 5
+
+    def __init__(self, number_of_smaller_shapes):
+        self._number_of_smaller_shapes = number_of_smaller_shapes
+
+    @property
+    def name(self):
+        return 'Partition Shape into Smaller Shapes with Same Rotation'
+
+    def generate(self, ravens_matrix, axis):
+        # Verify this relationship applies by validating it using the first and second rows
+        if not self._validate(ravens_matrix[0]) or not self._validate(ravens_matrix[1]):
+            return None
+
+        # Extract the shape from the first image of the last row
+        shapes = _extractor.apply(ravens_matrix[2][0])
+
+        # Sanity check: make sure the last row also complies with the requirements
+        if len(shapes) != 1:
+            return None
+
+        # The expected result is the shape and the angle that the smaller shapes must have
+        return shapes[0].shape, shapes[0].angle
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # This relationship is invalid so no answer can be given
+            return None
+
+        expected_shape, expected_angle = expected
+
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+
+            # First, validate the answer complies with the expected number of shapes
+            if len(answer_shapes) != self._number_of_smaller_shapes:
+                continue
+
+            # Then validate the smaller shapes are equal to the expected shape
+            if not self._shapes_are_equal(expected_shape, answer_shapes):
+                continue
+
+            # Finally, validate the smaller shapes have the same angle as the expected one
+            if not self._shapes_have_equal_angles(expected_angle, answer_shapes):
+                continue
+
+            # We have found an answer that complies with all the expected results!
+            return index + 1
+
+        return None
+
+    def is_valid(self, axis):
+        # Only valid for rows
+        return axis == 0
+
+    def _validate(self, row):
+        shapes_first = _extractor.apply(row[0])
+        shapes_third = _extractor.apply(row[2])
+
+        # There must be one single shape in the first frame
+        # There must be N smaller shapes in the third frame
+        # The smaller shapes must be the same as the shape from the first frame
+        # The shapes in the third frame should have the same angle as the shape from the first
+        return (len(shapes_first) == 1 and
+                len(shapes_third) == self._number_of_smaller_shapes and
+                self._shapes_are_equal(shapes_first[0].shape, shapes_third) and
+                self._shapes_have_equal_angles(shapes_first[0].angle, shapes_third))
+
+    def _shapes_are_equal(self, shape, other_shapes):
+        # Checks if all the other shapes are equal to the given shape
+        return sum([shape == other.shape for other in other_shapes]) == len(other_shapes)
+
+    def _shapes_have_equal_angles(self, angle, other_shapes):
+        # Checks if all the other shapes have the same angle, with certain tolerance, as the given shape's angle
+        return sum([abs(angle - other.angle) <= self._TOLERANCE for other in other_shapes]) == len(other_shapes)
+
+
+class SidesArithmetic3x3(SemanticRelationship3x3):
+    """
+    Generates a semantic relationship of arithmetic between frames based on shapes' sides for 3x3 matrices.
+    This semantic relationship is only going to be valid for problems where there are geometric figures.
+
+    For problems Challenge Problem E-05 and Challenge Problem E-06.
+    """
+    # Operator for Challenge Problem E-05
+    CONSTANT_INCREMENT = 0
+    # Operator for Challenge Problem E-06
+    ADDITION = 1
+
+    def __init__(self, operator):
+        self._operator = operator
+
+    @property
+    def name(self):
+        return 'Sides Arithmetic 3x3'
+
+    def generate(self, ravens_matrix, axis):
+        if self._operator == self.CONSTANT_INCREMENT:
+            return self._apply_constant_increment(ravens_matrix, axis)
+        elif self._operator == self.ADDITION:
+            return self._apply_addition(ravens_matrix, axis)
+        else:
+            raise ValueError('Invalid operator {}!'.format(self._operator))
+
+    def test(self, expected, ravens_matrix, answers, axis):
+        if expected is None:
+            # Invalid relationship no answer can be given
+            return None
+
+        if self._operator == self.CONSTANT_INCREMENT:
+            return self._test_constant_increment(expected, ravens_matrix, answers, axis)
+        elif self._operator == self.ADDITION:
+            return self._test_addition(expected, ravens_matrix, answers, axis)
+        else:
+            raise ValueError('Invalid operator {}!'.format(self._operator))
+
+    def is_valid(self, axis):
+        # Only applies to rows or columns since diagonals cannot be validated
+        return axis != 2
+
+    def _apply_constant_increment(self, matrix, axis):
+        # First validate this relationship applies
+        if axis == 0:
+            if (not self._validate_constant_increment_row(matrix[0]) or
+                    not self._validate_constant_increment_row(matrix[1])):
+                return None
+        elif axis == 1:
+            if (not self._validate_constant_increment_column(matrix, 0) or
+                    not self._validate_constant_increment_column(matrix, 1)):
+                return None
+
+        # Compute the expected increment given the first and second image
+        first = _extractor.apply(self._select_first_image(matrix, axis))
+        second = _extractor.apply(self._select_second_image(matrix, axis))
+
+        return self._sum_sides(second) - self._sum_sides(first)
+
+    def _apply_addition(self, matrix, axis):
+        # First validate this relationship applies
+        if axis == 0:
+            if not self._validate_addition_row(matrix[0]) or not self._validate_addition_row(matrix[1]):
+                return None
+        elif axis == 1:
+            if not self._validate_addition_column(matrix, 0) or not self._validate_addition_column(matrix, 1):
+                return None
+
+        # Compute the expected result of the addition of the first and second image
+        first = _extractor.apply(self._select_first_image(matrix, axis))
+        second = _extractor.apply(self._select_second_image(matrix, axis))
+
+        return self._sum_sides(first) + self._sum_sides(second)
+
+    def _validate_constant_increment_row(self, row):
+        first = _extractor.apply(row[0])
+        second = _extractor.apply(row[1])
+        third = _extractor.apply(row[2])
+
+        return self._validate_constant_increment_shapes(first, second, third)
+
+    def _validate_constant_increment_column(self, matrix, column):
+        first = _extractor.apply(matrix[0][column])
+        second = _extractor.apply(matrix[1][column])
+        third = _extractor.apply(matrix[2][column])
+
+        return self._validate_constant_increment_shapes(first, second, third)
+
+    def _validate_constant_increment_shapes(self, shapes_1, shapes_2, shapes_3):
+        increment_second_first = self._sum_sides(shapes_2) - self._sum_sides(shapes_1)
+        increment_third_second = self._sum_sides(shapes_3) - self._sum_sides(shapes_2)
+
+        return increment_second_first == increment_third_second
+
+    def _validate_addition_row(self, row):
+        first = _extractor.apply(row[0])
+        second = _extractor.apply(row[1])
+        third = _extractor.apply(row[2])
+
+        return self._validate_addition_shapes(first, second, third)
+
+    def _validate_addition_column(self, matrix, column):
+        first = _extractor.apply(matrix[0][column])
+        second = _extractor.apply(matrix[1][column])
+        third = _extractor.apply(matrix[2][column])
+
+        return self._validate_addition_shapes(first, second, third)
+
+    def _validate_addition_shapes(self, shapes_1, shapes_2, shapes_3):
+        return self._sum_sides(shapes_1) + self._sum_sides(shapes_2) == self._sum_sides(shapes_3)
+
+    def _test_constant_increment(self, expected, matrix, answers, axis):
+        second = _extractor.apply(self._select_second_image(matrix, axis))
+
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+
+            if self._sum_sides(answer_shapes) - self._sum_sides(second) == expected:
+                # We have found an answer that complies with the expected increment in sides
+                return index + 1
+
+        return None
+
+    def _test_addition(self, expected, matrix, answers, axis):
+        for index, answer in enumerate(answers):
+            answer_shapes = _extractor.apply(answer)
+
+            if self._sum_sides(answer_shapes) == expected:
+                # We have found an answer whose sum of sides equals the expected result
+                return index + 1
+
+        return None
+
+    def _sum_sides(self, shapes):
+        return sum([s.sides for s in shapes])
 
 
 def _convert_matrix_to_shapes(matrix):

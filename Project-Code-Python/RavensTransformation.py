@@ -237,7 +237,7 @@ class ImageDuplication(SingleTransformation):
         # Override the confidence threshold because the images will not match perfectly based on
         # the duplication operators; however, they should be fairly similar, but not as strict
         # as the default 90% confidence threshold
-        return 0.8
+        return 0.85
 
     def apply(self, image, **kwargs):
         if kwargs.get('A', None) is None:
@@ -368,7 +368,7 @@ class ImageSwitchSidesHorizontallyTransformation(SingleTransformation):
         # Override the confidence threshold because the images will not match perfectly based on
         # the movement operators; however, they should be fairly similar, but not as strict
         # as the default 90% confidence threshold
-        return 0.8
+        return 0.75
 
     def apply(self, image, **kwargs):
         # For this transformation, we assume only two shapes are present and each one is exactly
@@ -574,6 +574,10 @@ class UnionTransformation(MultiTransformation):
     @property
     def name(self):
         return 'Union'
+
+    @property
+    def confidence(self):
+        return 0.86
 
     def apply(self, image, **kwargs):
         super(UnionTransformation, self)._validate(**kwargs)
